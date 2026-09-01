@@ -118,6 +118,11 @@ typeof_app @ typeof(Env, app(F, Arg), T) <=>
     typeof(Env, Arg, TA),
     unify_ty(TF, arrow(TA, T)).
 
+typeof_let @ typeof(Env, let(X, Val, Body), T) <=>
+    typeof(Env, Val, A),
+    Env2 = [bind(X, A) | Env],
+    typeof(Env2, Body, T).
+
 % ==========================================================================
 % Context lookup: lookup_ty(Env, Name, T)
 % ==========================================================================
