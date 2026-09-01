@@ -53,13 +53,13 @@
 % Entry point. `Result` is unified with `ok(Type)` when inference
 % succeeds, or `type_error(Errors)` when it does not.
 :- chr_constraint
-    typecheck(any, tc_result),
-    typeof(any, any, ty),
-    lookup_ty(any, any, ty),
+    typecheck(expr, tc_result),
+    typeof(list(binding), expr, ty),
+    lookup_ty(list(binding), string, ty),
     unify_ty(ty, ty),
     bind_ty(ty, ty),
     number_vars(ty),
-    assign_tvars(any, int),
+    assign_tvars(list(ty), int),
     finish(any, ty, tc_result),
     report_error(any),
     errors(any),
