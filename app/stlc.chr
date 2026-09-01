@@ -43,7 +43,9 @@
 % The type language, by contrast, is built and matched entirely inside
 % this module, so it is a proper declared type. `tvar` is produced only by
 % `number_vars`, at the very end.
+:- chr_type expr ---> lit_int(int) ; add(expr, expr) ; var(string) ; lam(string, expr) ; app(expr, expr) ; let(string, expr, expr).
 :- chr_type ty ---> tint ; arrow(ty, ty) ; tvar(int).
+:- chr_type binding ---> bind(string, ty).
 
 % The two possible results of inference (decoded on the Haskell side).
 :- chr_type tc_result ---> ok(ty) ; type_error(list(any)).
