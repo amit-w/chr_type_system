@@ -23,7 +23,7 @@ import Data.Char (isSpace)
 import Data.List (intercalate)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Embed (stlcPath, stlcSource)
+import Embed (stlcPath, ChrSource, newChrSource, readChrSource)
 import Parser (parseExpr)
 import Syntax (Expr)
 import System.Environment (getArgs)
@@ -93,18 +93,19 @@ instance FromTerm TCResult where
 main :: IO ()
 main = do
   args <- getArgs
-  cp <- loadInferencer
+  chrSource <- loadInferencer stlcPath
   case args of
-    ["--demo"] -> runDemo cp
-    [] -> runRepl cp
+    ["--demo"] -> runDemo =<< readChrSource chrSource
+    [] -> runRepl chrSource
     _ -> hPutStrLn stderr "usage: stlc-typechecker [--demo]" >> exitFailure
 
 -- | Compile the embedded inferencer once; reuse it across every query.
-loadInferencer :: IO CompiledProgram
-loadInferencer =
-  case compileModules True [(stlcPath, $(stlcSource))] of
-    Left err -> fail ("could not compile " ++ stlcPath ++ ":\n" ++ displayError err)
-    Right (cp, _warnings) -> pure cp
+loadInferencer :: FilePath -> IO (ChrSource CompiledProgram)
+loadInferencer path =
+  newChrSource path $ \source ->
+    case compileModules True [(path, source)] of
+      Left err -> fail ("could not compile " ++ stlcPath ++ ":\n" ++ displayError err)
+      Right (chrSource, _warnings) -> pure chrSource
 
 -- | Parse, type-check, and render one line of surface syntax.
 inferLine :: CompiledProgram -> String -> IO String
@@ -125,8 +126,8 @@ typecheckGoal e = compound "typecheck" [quote e, VarTerm "Result"]
 -- REPL
 -- ---------------------------------------------------------------------------
 
-runRepl :: CompiledProgram -> IO ()
-runRepl cp = do
+runRepl :: ChrSource CompiledProgram -> IO ()
+runRepl chrSource = do
   hSetBuffering stdout NoBuffering
   interactive <- hIsTerminalDevice stdin
   when interactive $
@@ -149,6 +150,7 @@ runRepl cp = do
       | null command = pure True
       | otherwise = do
           when (not interactive) (putStrLn ("stlc> " ++ line))
+          cp <- readChrSource chrSource
           inferLine cp line >>= putStrLn
           pure True
       where

@@ -80,7 +80,7 @@ executable chr-type-system
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.20.2.0
                     , parsec >=3.1 && <3.2
-                    , template-haskell >=2.20 && <2.24
+                    , unix == 2.8.8.0
                     , ychr == 0.1.0.0
 
     -- Directories containing source files.

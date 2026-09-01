@@ -1,30 +1,47 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
--- | Compile-time embedding of the inferencer source, so the example
--- binary is self-contained (no cwd-relative @.chr@ path at run time).
--- Mirrors the pattern used by the built-in type checker in
--- "YCHR.Internal.TypeCheck.TH".
 module Embed
-  ( stlcPath,
-    stlcSource,
+  ( stlcPath
+  , ChrSource
+  , newChrSource
+  , readChrSource
   )
 where
 
+import Control.Monad (when)
+
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text.IO qualified as TIO
-import Language.Haskell.TH (Exp, Q)
-import Language.Haskell.TH.Syntax (addDependentFile, lift, runIO)
+
+import System.Posix (getFileStatus, modificationTime, EpochTime)
+
+data ChrSource a
+  = ChrSource
+  { path :: FilePath
+  , f :: Text -> IO a
+  , timestamp :: IORef EpochTime
+  , value :: IORef a
+  }
+
+newChrSource :: FilePath -> (Text -> IO a) -> IO (ChrSource a)
+newChrSource path f = do
+  timestamp <- newIORef . modificationTime =<< getFileStatus path
+  value <- newIORef =<< f =<< TIO.readFile path
+  pure $ ChrSource {path, f, timestamp, value}
+
+readChrSource :: ChrSource a -> IO a
+readChrSource chrSource = do
+  fileTimeStamp <- modificationTime <$> getFileStatus chrSource.path
+  storedTimeStamp <- readIORef chrSource.timestamp
+  when (fileTimeStamp > storedTimeStamp) $ do
+    writeIORef chrSource.timestamp fileTimeStamp
+    writeIORef chrSource.value =<< chrSource.f =<< TIO.readFile chrSource.path
+  readIORef chrSource.value
 
 -- | Path of the inferencer source, relative to the package root (GHC runs
 -- splices with the cabal package directory as cwd). Also surfaced in
 -- compile diagnostics.
 stlcPath :: FilePath
 stlcPath = "app/stlc.chr"
-
--- | Splice yielding the inferencer source as 'Text'. 'addDependentFile'
--- makes GHC recompile the example when the @.chr@ changes.
-stlcSource :: Q Exp
-stlcSource = do
-  addDependentFile stlcPath
-  contents <- runIO (TIO.readFile stlcPath)
-  lift (contents :: Text)
