@@ -45,7 +45,9 @@
 % `number_vars`, at the very end.
 :- chr_type expr ---> lit_int(int) ; add(expr, expr) ; var(string) ; lam(string, expr) ; app(expr, expr) ; let(string, expr, expr).
 :- chr_type ty ---> tint ; arrow(ty, ty) ; tvar(int).
-:- chr_type binding ---> bind(string, ty).
+:- chr_type bind_mode ---> mono ; poly(int).
+:- chr_type binding ---> bind(string, bind_mode, ty).
+:- opaque_type instantiation_domain.
 
 % The two possible results of inference (decoded on the Haskell side).
 :- chr_type tc_result ---> ok(ty) ; type_error(list(any)).
@@ -54,9 +56,13 @@
 % succeeds, or `type_error(Errors)` when it does not.
 :- chr_constraint
     typecheck(expr, tc_result),
-    typeof(list(binding), expr, ty),
+    typeof(int, list(binding), expr, ty),
+    level(ty, int),
+    level_all(list(ty), int),
     lookup_ty(list(binding), string, ty),
     unify_ty(ty, ty),
+    instantiate_ty(instantiation_domain, ty, ty),
+    instantiation_domain(instantiation_domain, int),
     bind_ty(ty, ty),
     number_vars(ty),
     assign_tvars(list(ty), int),
@@ -77,7 +83,8 @@
 
 typecheck(Expr, Result) <=>
     errors([]),
-    typeof([], Expr, T),
+    level(T, 0),
+    typeof(0, [], Expr, T),
     collect(Es),
     finish(Es, T, Result).
 
@@ -87,7 +94,24 @@ finish_ok @  finish([], T, Result) <=> number_vars(T), Result = ok(T).
 finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
 
 % ==========================================================================
-% Typing rules: typeof(Env, Expr, T)
+% Levels: level(Var, Level), level_all(Vars, Level)
+% ==========================================================================
+% 
+% Every type unification variable (and only them) has a level.
+% Every variable has a single level: the smallest level assigned to it.
+%
+% `level_all` is used to assigned a level to multiple variables.
+
+level_only_variable @ level(V, _) <=> nonvar(V) | true.
+% TODO delete?
+level_non_ground    @ level(_, Level) <=> var(Level) | report_error(quote(my_error)).
+level_smallest      @ level(V, Low) \ level(V, High) <=> High >= Low | true.
+
+level_all_peel @ level_all([V | Vs], Level) <=> level(V, Level), level_all(Vs, Level).
+level_all_end  @ level_all([], _) <=> true.
+
+% ==========================================================================
+% Typing rules: typeof(Level, Env, Expr, T)
 % ==========================================================================
 %
 % Env is an association list of `bind(Name, Type)` cells. Each rule is a
@@ -95,35 +119,45 @@ finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
 % subgoals that decompose it. Variables first mentioned in a body (A, B,
 % TF, TA below) are fresh type variables.
 
-typeof_int @ typeof(_, lit_int(_), T) <=> unify_ty(T, tint).
+% TODO delete?
+typeof_warn @ typeof(Level, _, Expr, _) <=> var(Level) | report_error(quote(other_error(Expr))).
+typeof_int @ typeof(_, _, lit_int(Val), T) <=> unify_ty(T, tint).
 
-typeof_add @ typeof(Env, add(A, B), T) <=>
-    typeof(Env, A, TA),
-    typeof(Env, B, TB),
+typeof_add @ typeof(Level, Env, add(A, B), T) <=>
+    level(TA, Level),
+    typeof(Level, Env, A, TA),
+    level(TB, Level),
+    typeof(Level, Env, B, TB),
     unify_ty(TA, tint),
     unify_ty(TB, tint),
     unify_ty(T, tint).
 
-typeof_var @ typeof(Env, var(X), T) <=> lookup_ty(Env, X, T).
+typeof_var @ typeof(_, Env, var(X), T) <=> lookup_ty(Env, X, T).
 
 % `Env2 = [...]` introduces the fresh argument-type variable A: a bare
 % unbound variable may not first appear nested inside a constraint tell
 % (whose arguments are evaluated), but `=` is pure unification and binds
 % the new variables in its operands.
-typeof_lam @ typeof(Env, lam(X, Body), T) <=>
-    Env2 = [bind(X, A) | Env],
-    typeof(Env2, Body, B),
+typeof_lam @ typeof(Level, Env, lam(X, Body), T) <=>
+    level(A, Level),
+    Env2 = [bind(X, mono, A) | Env],
+    level(B, Level),
+    typeof(Level, Env2, Body, B),
     unify_ty(T, arrow(A, B)).
 
-typeof_app @ typeof(Env, app(F, Arg), T) <=>
-    typeof(Env, F, TF),
-    typeof(Env, Arg, TA),
+typeof_app @ typeof(Level, Env, app(F, Arg), T) <=>
+    level(TF, Level),
+    typeof(Level, Env, F, TF),
+    level(TA, Level),
+    typeof(Level, Env, Arg, TA),
     unify_ty(TF, arrow(TA, T)).
 
-typeof_let @ typeof(Env, let(X, Val, Body), T) <=>
-    typeof(Env, Val, A),
-    Env2 = [bind(X, A) | Env],
-    typeof(Env2, Body, T).
+typeof_let @ typeof(Level, Env, let(X, Val, Body), T) <=>
+    NestedLevel is Level + 1,
+    level(A, Level),
+    typeof(NestedLevel, Env, Val, A),
+    Env2 = [bind(X, poly(Level), A) | Env],
+    typeof(Level, Env2, Body, T).
 
 % ==========================================================================
 % Context lookup: lookup_ty(Env, Name, T)
@@ -134,8 +168,11 @@ typeof_let @ typeof(Env, let(X, Val, Body), T) <=>
 % binding's name matches; otherwise the general second rule skips a cell.
 % Reaching the empty list means the variable was never bound.
 
-lookup_hit  @ lookup_ty([bind(X, Ty) | _], X, T) <=> unify_ty(T, Ty).
-lookup_skip @ lookup_ty([bind(_, _) | Rest], X, T) <=> lookup_ty(Rest, X, T).
+lookup_mono @ lookup_ty([bind(X, mono, Ty) | _], X, T) <=> unify_ty(T, Ty).
+lookup_poly @ lookup_ty([bind(X, poly(Level), Ty) | _], X, T) <=>
+    instantiation_domain(D, Level),
+    instantiate_ty(D, T, Ty).
+lookup_skip @ lookup_ty([bind(_, _, _) | Rest], X, T) <=> lookup_ty(Rest, X, T).
 lookup_miss @ lookup_ty([], X, _) <=> report_error(quote(unbound_variable(X))).
 
 % ==========================================================================
@@ -162,7 +199,36 @@ unify_bad @ unify_ty(T1, T2) <=> nonvar(T1), nonvar(T2) |
 % self-application (`lam(x, app(var(x), var(x)))`) would otherwise create.
 bind_occurs @ bind_ty(V, Ty) <=> occurs(V, Ty) |
     report_error(quote(infinite_type(V, Ty))).
-bind_ok     @ bind_ty(V, Ty) <=> V = Ty.
+bind_ok     @ level(V, Level) \ bind_ty(V, Ty) <=>
+    level_all(term_variables(Ty), Level),
+    V = Ty.
+
+% ==========================================================================
+% Instantiation: instantiate_ty(Domain, T1, T2)
+% ==========================================================================
+%
+% Instantiate T2 to T1 in level Level.
+% Domain is used to make sure that an instantiated variable always instantiate to the same type.
+% instantiation_domain(Domain, Level) sets the level of the domain.
+inst_tint       @ instantiate_ty(D, T, tint) <=> unify_ty(T, tint).
+inst_arrow      @ instantiation_domain(D, Level) \ instantiate_ty(D, T, arrow(A, B)) <=>
+    level(TA, Level),
+    instantiate_ty(D, TA, A),
+    level(TB, Level),
+    instantiate_ty(D, TB, B),
+    unify_ty(T, arrow(TA, TB)).
+inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
+inst_direct     @ instantiation_domain(D, DomainLevel), level(V, VarLevel) \
+    instantiate_ty(D, T, V) <=>
+    DomainLevel > VarLevel |
+    V = T.
+% TODO this should not happen
+inst_level_high @ instantiation_domain(D, DomainLevel), level(V, VarLevel) \
+    instantiate_ty(D, T, V) <=>
+    DomainLevel < VarLevel |
+    report_error(quote(inst_level_high)).
+inst_singleton  @ instantiate_ty(D, T1, V), instantiate_ty(D, T2, V) <=>
+    unify_ty(T1, T2).
 
 % ==========================================================================
 % Error accumulation

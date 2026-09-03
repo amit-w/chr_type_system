@@ -221,6 +221,10 @@ describeError t = case t of
   CompoundTerm n [x]
     | localName n == "unbound_variable" ->
         "unbound variable " ++ renderTypeTerm x
+  -- TODO DELETEME debug code
+  CompoundTerm inst_non_var [ty] | inst_non_var == Unqualified "inst_non_var" -> "tried to instantiate a non-var: " ++ renderTypeTerm ty
+  CompoundTerm my_error [] | my_error == Unqualified "my_error" -> "my_error"
+  CompoundTerm other_error [expr] | other_error == Unqualified "other_error" -> "other_error: " ++ show expr
   _ -> "?"
 
 -- ---------------------------------------------------------------------------
