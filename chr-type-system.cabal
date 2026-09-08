@@ -73,6 +73,7 @@ executable chr-type-system
         Embed
       , Syntax
       , Parser
+      , HFunctor
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -82,6 +83,7 @@ executable chr-type-system
                     , parsec >=3.1 && <3.2
                     , unix == 2.8.8.0
                     , ychr == 0.1.0.0
+                    , singletons == 3.0.4
 
     -- Directories containing source files.
     hs-source-dirs:   app
