@@ -23,7 +23,7 @@ import Data.Char (isSpace)
 import Data.List (intercalate)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Embed (stlcPath, ChrSource, newChrSource, readChrSource)
+import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
 import Parser (parseExpr)
 import Syntax (Expr)
 import System.Environment (getArgs)
@@ -49,8 +49,8 @@ import YCHR
     compound,
     decodeSum,
     displayError,
-    quote,
     runQueryCompiled,
+    toTerm,
   )
 
 -- ---------------------------------------------------------------------------
@@ -115,12 +115,13 @@ inferLine cp line = case parseExpr line of
     result <- runQueryCompiled cp (typecheckGoal e) "Result"
     pure (either show renderResult result)
 
--- | Build the goal @typecheck(quote(<expr>), Result)@. The @quote/1@
--- form ('quote') keeps the expression symbolic: without it the argument would
--- be evaluated, and @var(\"x\")@ in particular would call the prelude's
--- @var/1@ predicate instead of naming a variable node.
+-- | Build the goal @typecheck(<expr>, Result)@. The encoded expression
+-- needs no quoting: @expr@ is a declared, exported type, so the goal's
+-- bare @evar@ \/ @lam@ \/ ... references are canonicalized to
+-- @stlc:evar@, @stlc:lam@, ... — the same form the rule heads match,
+-- and data rather than function calls.
 typecheckGoal :: Expr -> Term
-typecheckGoal e = compound "typecheck" [quote e, VarTerm "Result"]
+typecheckGoal e = compound "typecheck" [toTerm e, VarTerm "Result"]
 
 -- ---------------------------------------------------------------------------
 -- REPL

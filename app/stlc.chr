@@ -12,10 +12,11 @@
 %   - unification of type structures is a handful of simplification rules;
 %   - the typing context and the accumulated errors live in the store.
 %
-% The object language (built by the Haskell side):
-%   var(Name)        a variable reference        (Name is a string)
+% The object language (`expr`, built by the Haskell side):
+%   evar(Name)       a variable reference        (Name is a string)
 %   lam(Name, Body)  an *unannotated* lambda      (argument type inferred)
 %   app(F, X)        application
+%   TODO add let
 %   lit_int(N)       an integer literal
 %   add(A, B)        integer addition             (forces both sides to int)
 %
@@ -27,26 +28,34 @@
 %                    such as `arrow(tvar(0), tvar(0))` can be printed and
 %                    decoded with its sharing intact.
 
-:- module(stlc, [typecheck/2]).
+:- module(stlc, [typecheck/2, type(expr/0)]).
 :- use_module(library(prelude)).
 
 % The object language is *host-supplied data*: the Haskell driver builds
-% these compounds and passes them in (wrapped in `quote/1`, so they are
-% never evaluated as calls — `var/1`, in particular, is also a prelude
-% predicate). They are matched structurally in rule heads and so are left
-% as ordinary (undeclared) functors rather than `:- chr_type` constructors:
-%   var(Name)  lam(Name, Body)  app(F, X)  lit_int(N)  add(A, B)
-% Because they are undeclared, `ychr check` reports each one as an
-% "undeclared data constructor" (YCHR-20101); that is expected here — these
-% are an opaque interchange format for the host, not types this module owns.
+% these compounds and passes them in. It is a declared type, and it is
+% exported, precisely so that goal arguments built by the host are
+% canonicalized to `stlc:evar`, `stlc:lam`, ... — the same qualified
+% form the rule heads below were compiled to.
 %
-% The type language, by contrast, is built and matched entirely inside
-% this module, so it is a proper declared type. `tvar` is produced only by
-% `number_vars`, at the very end.
-:- chr_type expr ---> lit_int(int) ; add(expr, expr) ; var(string) ; lam(string, expr) ; app(expr, expr) ; let(string, expr, expr).
+% The variable node is `evar`, not `var`: the prelude declares a
+% `var/1` function, and a data constructor may not share a bare name
+% with a visible function (YCHR-20020). The guards below want that
+% prelude function, so the constructor is the side that moves.
+:- chr_type expr ---> evar(string)
+                    ; lam(string, expr)
+                    ; app(expr, expr)
+                    ; lit_int(int)
+                    ; add(expr, expr).
+
+% The type language is built and matched entirely inside this module.
+% `tvar` is produced only by `number_vars`, at the very end.
 :- chr_type ty ---> tint ; arrow(ty, ty) ; tvar(int).
+
 :- chr_type bind_mode ---> mono ; poly(int).
+
+% A typing-context cell. `Env` is a list of these.
 :- chr_type binding ---> bind(string, bind_mode, ty).
+
 :- opaque_type instantiation_domain.
 
 % The two possible results of inference (decoded on the Haskell side).
@@ -121,7 +130,7 @@ level_all_end  @ level_all([], _) <=> true.
 
 % TODO delete?
 typeof_warn @ typeof(Level, _, Expr, _) <=> var(Level) | report_error(quote(other_error(Expr))).
-typeof_int @ typeof(_, _, lit_int(Val), T) <=> unify_ty(T, tint).
+typeof_int @ typeof(_, _, lit_int(_), T) <=> unify_ty(T, tint).
 
 typeof_add @ typeof(Level, Env, add(A, B), T) <=>
     level(TA, Level),
@@ -132,7 +141,7 @@ typeof_add @ typeof(Level, Env, add(A, B), T) <=>
     unify_ty(TB, tint),
     unify_ty(T, tint).
 
-typeof_var @ typeof(_, Env, var(X), T) <=> lookup_ty(Env, X, T).
+typeof_var @ typeof(_, Env, evar(X), T) <=> lookup_ty(Env, X, T).
 
 % `Env2 = [...]` introduces the fresh argument-type variable A: a bare
 % unbound variable may not first appear nested inside a constraint tell
@@ -196,7 +205,7 @@ unify_bad @ unify_ty(T1, T2) <=> nonvar(T1), nonvar(T2) |
     report_error(quote(mismatch(T1, T2))).
 
 % Bind a variable to a type, guarding against the infinite types that
-% self-application (`lam(x, app(var(x), var(x)))`) would otherwise create.
+% self-application (`lam(x, app(evar(x), evar(x)))`) would otherwise create.
 bind_occurs @ bind_ty(V, Ty) <=> occurs(V, Ty) |
     report_error(quote(infinite_type(V, Ty))).
 bind_ok     @ level(V, Level) \ bind_ty(V, Ty) <=>

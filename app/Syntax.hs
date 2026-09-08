@@ -10,7 +10,7 @@ module Syntax
 where
 
 import Data.Text (Text)
-import YCHR (ToTerm (..), Term(CompoundTerm), Name(Qualified))
+import YCHR (ToTerm (..), compound)
 
 -- | Unannotated lambda terms. @let x = e1 in e2@ is desugared by the
 -- parser to @(\\x. e2) e1@, so it needs no constructor of its own.
@@ -24,15 +24,14 @@ data Expr
   deriving (Eq, Show)
 
 -- | Encode a term as the CHR data the inferencer matches on. These are
--- plain compounds (@var@, @lam@, …), which the driver passes in quoted
--- with @quote/1@ so they are treated as data rather than evaluated.
+-- plain compounds (@evar@, @lam@, …). The inferencer declares and exports
+-- them as the @expr@ type, so the goal-building step canonicalizes each
+-- one to its qualified form (@stlc:evar@, …) and it reaches the rules as
+-- data.
 instance ToTerm Expr where
-  toTerm (Var x) = CompoundTerm (Qualified module_name "var") [toTerm x]
-  toTerm (Lam x body) = CompoundTerm (Qualified module_name "lam") [toTerm x, toTerm body]
-  toTerm (App f a) = CompoundTerm (Qualified module_name "app") [toTerm f, toTerm a]
-  toTerm (Let x a e) = CompoundTerm (Qualified module_name "let") [toTerm x, toTerm a, toTerm e]
-  toTerm (IntLit n) = CompoundTerm (Qualified module_name "lit_int") [toTerm n]
-  toTerm (Add a b) = CompoundTerm (Qualified module_name "add") [toTerm a, toTerm b]
-
-module_name :: Text
-module_name = "stlc"
+  toTerm (Var x) = compound "evar" [toTerm x]
+  toTerm (Lam x body) = compound "lam" [toTerm x, toTerm body]
+  toTerm (App f a) = compound "app" [toTerm f, toTerm a]
+  toTerm (Let x a e) = compound "let" [toTerm x, toTerm a, toTerm e]
+  toTerm (IntLit n) = compound "lit_int" [toTerm n]
+  toTerm (Add a b) = compound "add" [toTerm a, toTerm b]
