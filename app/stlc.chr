@@ -13,12 +13,12 @@
 %   - the typing context and the accumulated errors live in the store.
 %
 % The object language (`expr`, built by the Haskell side):
-%   evar(Name)       a variable reference        (Name is a string)
-%   lam(Name, Body)  an *unannotated* lambda      (argument type inferred)
-%   app(F, X)        application
-%   TODO add let
-%   lit_int(N)       an integer literal
-%   add(A, B)        integer addition             (forces both sides to int)
+%   evar(Name)           a variable reference         (Name is a string)
+%   lam(Name, Body)      an *unannotated* lambda      (argument type inferred)
+%   app(F, X)            application
+%   let(Name, Val, Body) a let binding                (Name is a string)
+%   lit_int(N)           an integer literal
+%   add(A, B)            integer addition             (forces both sides to int)
 %
 % The type language (`ty`, below):
 %   tint             the base type of integers
