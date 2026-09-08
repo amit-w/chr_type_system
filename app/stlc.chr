@@ -44,6 +44,7 @@
 :- chr_type expr ---> evar(string)
                     ; lam(string, expr)
                     ; app(expr, expr)
+                    ; let(string, expr, expr)
                     ; lit_int(int)
                     ; add(expr, expr).
 
