@@ -1,7 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-
 module YCHR.Convert.DecodeM (
   DecodeM,
   decodeVarM,

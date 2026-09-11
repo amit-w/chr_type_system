@@ -57,8 +57,13 @@ common common
                     , text >=2.0 && <2.2
                     , ychr == 0.1.0.0
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
+    default-extensions:
+        , DefaultSignatures
+        , DerivingStrategies
+        , DerivingVia
+        , OverloadedRecordDot
+        , OverloadedStrings
+        , TypeFamilies
 
     ghc-options: -Wall
 
