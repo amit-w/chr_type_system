@@ -18,13 +18,10 @@
 module Main (main) where
 
 import Control.Monad (forM_, when)
-import Control.Monad.State (evalState, State, modify, MonadState (get))
-import Control.Monad.Reader (ReaderT(runReaderT))
 import Data.Char (isSpace)
-import Data.Functor.Const (Const (..))
 import Data.List (intercalate)
 
-import System.Environment (getArgs)
+import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
 import System.IO
   ( BufferMode (NoBuffering),
@@ -38,68 +35,36 @@ import System.IO
     stdout,
   )
 
-import Data.Text (Text, pack)
+import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Singletons (SingI (..))
 
 import YCHR
   ( CompiledProgram,
-    FromTerm (..),
     Name (..),
     Term (..),
-    ToTerm,
-    argAt,
     compileModules,
-    compound,
-    decodeSum,
     displayError,
-    runQueryCompiledWith,
-    toTerm,
-    ConvertError,
   )
 
-import Data.HTraversable (HTraversable (htraverse))
-
-import YCHR.Convert.DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
-
-import Language.Lambda.Parser (parseExpr, Expr)
-import Language.Lambda.Syntax (GenExpr (..), Loc (..), SLoc (..))
+import Language.Lambda.Parser (parseExpr)
+import Language.Lambda.Syntax (GenExpr (..))
+import Language.Lambda.Typecheck
+    ( TryTypedExpr(..),
+      TypeAnnotations(Poly, ArgType, Mono),
+      TCResult(..),
+      Type(..),
+      typecheck )
 
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
-import Render 
-
--- ---------------------------------------------------------------------------
--- Decoding the result
--- ---------------------------------------------------------------------------
-
-data Type
-  = TInt
-  | TArrow Type Type
-  | TVar Int Int
-
--- | Decode a @ty@ term. The functor is matched on its local name, so the
--- module-qualified @stlc:arrow@ that comes back still decodes.
-instance FromTerm Type where
-  fromTerm =
-    decodeSum
-      [ ("tint", 0, \_ -> Right TInt),
-        ("arrow", 2, \as -> TArrow <$> argAt 0 as <*> argAt 1 as),
-        ("tvar", 2, \as -> TVar <$> argAt 0 as <*> argAt 1 as)
-      ]
-
--- | The inferencer answers with @ok(Type)@ or @type_error(Errors)@. The
--- error list is kept as raw 'Term's (they mention pre-generalization type
--- variables that would not decode as a ground 'Type') and rendered below.
-data TCResult
-  = Ok Type
-  | Ill [Term]
-
-instance FromTerm TCResult where
-  fromTerm =
-    decodeSum
-      [ ("ok", 1, \as -> Ok <$> argAt 0 as),
-        ("type_error", 1, \as -> Ill <$> argAt 0 as)
-      ]
+import Render
+    ( Render,
+      restartPrec,
+      paren,
+      renderString,
+      renderText,
+      runRender,
+      withPrec,
+      noAssoc ) 
 
 -- ---------------------------------------------------------------------------
 -- Driver
@@ -107,12 +72,13 @@ instance FromTerm TCResult where
 
 main :: IO ()
 main = do
+  progName <- getProgName
   args <- getArgs
   chrSource <- loadInferencer stlcPath
   case args of
     ["--demo"] -> runDemo =<< readChrSource chrSource
     [] -> runRepl chrSource
-    _ -> hPutStrLn stderr "usage: stlc-typechecker [--demo]" >> exitFailure
+    _ -> hPutStrLn stderr ("usage: " ++ progName ++ " [--demo]") >> exitFailure
 
 -- | Compile the embedded inferencer once; reuse it across every query.
 loadInferencer :: FilePath -> IO (ChrSource CompiledProgram)
@@ -122,73 +88,16 @@ loadInferencer path =
       Left err -> fail ("could not compile " ++ stlcPath ++ ":\n" ++ displayError err)
       Right (chrSource, _warnings) -> pure chrSource
 
-newtype ChrVar = ChrVar {varName :: Text}
-  deriving (Eq, Show)
-
-instance ToTerm ChrVar where
-  toTerm v = VarTerm v.varName
-
-type NumberedExpr = GenExpr (Const ChrVar)
-
-numberExpr :: Expr -> NumberedExpr
-numberExpr e = evalState (htraverse (const freshVariable) e) 0 where
-  freshVariable :: State Int (Const ChrVar x)
-  freshVariable = do
-    modify (+ 1)
-    Const . ChrVar . indexToVarName <$> get
-
-  indexToVarName :: Int -> Text
-  indexToVarName = ("Var" <>) . pack . show
-
-data family TypeAnnotations (loc :: Loc)
-newtype instance TypeAnnotations LocLam = ArgType { getType :: Type }
-data instance TypeAnnotations LocVar = Mono | Poly [Type]
-
-type TypedExpr = GenExpr TypeAnnotations
-
-data TryTypedExpr
-  = Typed TypedExpr
-  | Failed (GenExpr (Const Term))
-
-typecheck :: CompiledProgram -> Expr -> IO (Either ConvertError (TryTypedExpr, TCResult))
-typecheck cp e =
-  let e' = numberExpr e
-  in runQueryCompiledWith cp (typecheckGoal e') (decodeResult e').runReaderT
-
 -- | Parse, type-check, and render one line of surface syntax.
 inferLine :: CompiledProgram -> String -> IO String
 inferLine cp line = case parseExpr line of
-  Left err -> pure ("parse error: " ++ firstLine err)
+  Left err -> pure ("parse error: " ++ err)
   Right e -> do
     result <- typecheck cp e
-    pure (either (\err -> "convert error: " ++ show err) (\(typedExpr :: TryTypedExpr, exprType :: TCResult) -> renderResult exprType ++ "\n" ++ renderTryExpr typedExpr) result)
-
-decodeChrVar :: FromTerm a => Const ChrVar x -> DecodeM a
-decodeChrVar chrVar = decodeVarM chrVar.getConst.varName
-
-decodeResult :: NumberedExpr -> DecodeM (TryTypedExpr, TCResult)
-decodeResult e = liftA2 (,) (typedExpr `orElse` failedTypedExpr) (decodeVarM "Result")
-  where
-    typedExpr = Typed <$> htraverse decodeAnnotation e
-    failedTypedExpr = Failed <$> htraverse (\var -> Const <$> decodeChrVar var) e
-
-decodeAnnotation :: forall x. (SingI x) => Const ChrVar x -> DecodeM (TypeAnnotations x)
-decodeAnnotation chrVar = case sing @x of
-  SLocVar -> do
-    term <- decodeChrVar chrVar
-    decodeSumM
-      [ ("mono_var", 0, const (pure Mono)),
-        ("poly_var", 1, \as -> fmap Poly (argAtM 0 as))
-      ] term
-  SLocLam -> ArgType <$> decodeChrVar chrVar
-
--- | Build the goal @typecheck(<expr>, Result)@. The encoded expression
--- needs no quoting: @expr@ is a declared, exported type, so the goal's
--- bare @evar@ \/ @lam@ \/ ... references are canonicalized to
--- @stlc:evar@, @stlc:lam@, ... — the same form the rule heads match,
--- and data rather than function calls.
-typecheckGoal :: NumberedExpr -> Term
-typecheckGoal e = compound "typecheck" [toTerm e, VarTerm "Result"]
+    pure $ case result of
+      Left err -> show err
+      Right (typedExpr, exprType) -> renderResult exprType ++ "\n" ++ renderTryExpr typedExpr
+        
 
 -- ---------------------------------------------------------------------------
 -- REPL
@@ -233,7 +142,7 @@ runDemo cp = do
   putStrLn "Curry-style STLC type inference (via a CHR module):\n"
   forM_ demoInputs $ \s -> do
     rendered <- inferLine cp s
-    putStrLn (pad 26 s ++ " :  " ++ rendered)
+    putStrLn (pad 26 s ++ " :  " ++ firstLine rendered)
 
 demoInputs :: [String]
 demoInputs =
