@@ -24,6 +24,7 @@
 %   tint             the base type of integers
 %   arrow(S, T)      a function type
 %   tvar(N)          a numbered type variable, produced only at the very
+% TODO re-doc next lines
 %                    end by `number_vars` so that a polymorphic result
 %                    such as `arrow(tvar(0), tvar(0))` can be printed and
 %                    decoded with its sharing intact.
@@ -41,22 +42,26 @@
 % `var/1` function, and a data constructor may not share a bare name
 % with a visible function (YCHR-20020). The guards below want that
 % prelude function, so the constructor is the side that moves.
-:- chr_type expr ---> evar(string)
-                    ; lam(string, expr)
+:- chr_type expr ---> evar(string, var_annotation)
+                    ; lam(string, ty, expr)
                     ; app(expr, expr)
                     ; let(string, expr, expr)
                     ; lit_int(int)
                     ; add(expr, expr).
+:- chr_type var_annotation ---> mono_var ; poly_var(list(ty)).
 
 % The type language is built and matched entirely inside this module.
+% TODO update next line
 % `tvar` is produced only by `number_vars`, at the very end.
-:- chr_type ty ---> tint ; arrow(ty, ty) ; tvar(int).
+% `tvar` is `tvar(Level, Number)`
+:- chr_type ty ---> tint ; arrow(ty, ty) ; tvar(int, int).
 
-:- chr_type bind_mode ---> mono ; poly(int).
+:- chr_type bind_mode ---> mono ; poly(generalization_domain).
 
 % A typing-context cell. `Env` is a list of these.
 :- chr_type binding ---> bind(string, bind_mode, ty).
 
+:- opaque_type generalization_domain.
 :- opaque_type instantiation_domain.
 
 % The two possible results of inference (decoded on the Haskell side).
@@ -66,18 +71,26 @@
 % succeeds, or `type_error(Errors)` when it does not.
 :- chr_constraint
     typecheck(expr, tc_result),
-    typeof(int, list(binding), expr, ty),
-    level(ty, int),
-    level_all(list(ty), int),
-    lookup_ty(list(binding), string, ty),
+    typeof(generalization_domain, list(binding), expr, ty),
+    % TODO rename level & level_all
+    level(ty, generalization_domain),
+    level_all(list(ty), generalization_domain),
+    lookup_ty(list(binding), string, ty, var_annotation),
     unify_ty(ty, ty),
+    generalization_domain(generalization_domain, int),
+    gd_args(generalization_domain, list(ty)),
+    % TODO type this
+    let_type_args/3,
+    number_domain(generalization_domain, int, int, list(ty)),
     instantiate_ty(instantiation_domain, ty, ty),
-    instantiation_domain(instantiation_domain, int),
+    instantiation_domain(instantiation_domain, var_annotation, generalization_domain),
     bind_ty(ty, ty),
-    number_vars(ty),
-    assign_tvars(list(ty), int),
+    assign_tvars(list(ty), int, int),
     finish(any, ty, tc_result),
     report_error(any),
+    % TODO rename start_* to phase_*
+    start_numbering,
+    start_let_type_args,
     errors(any),
     collect(any).
 
@@ -93,13 +106,14 @@
 
 typecheck(Expr, Result) <=>
     errors([]),
-    level(T, 0),
-    typeof(0, [], Expr, T),
+    generalization_domain(TopGD, 0),
+    level(T, TopGD),
+    typeof(TopGD, [], Expr, T),
     collect(Es),
     finish(Es, T, Result).
 
 % No errors: ground the residual type variables and report the type.
-finish_ok @  finish([], T, Result) <=> number_vars(T), Result = ok(T).
+finish_ok @  finish([], T, Result) <=> start_numbering, start_let_type_args, Result = ok(T).
 % At least one error: report them, leaving the (partial) type untouched.
 finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
 
@@ -113,15 +127,13 @@ finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
 % `level_all` is used to assigned a level to multiple variables.
 
 level_only_variable @ level(V, _) <=> nonvar(V) | true.
-% TODO delete?
-level_non_ground    @ level(_, Level) <=> var(Level) | report_error(quote(my_error)).
-level_smallest      @ level(V, Low) \ level(V, High) <=> High >= Low | true.
+level_smallest      @ level(V, GDLow), generalization_domain(GDLow, Low), generalization_domain(GDHigh, High) \ level(V, GDHigh) <=> High >= Low | true.
 
 level_all_peel @ level_all([V | Vs], Level) <=> level(V, Level), level_all(Vs, Level).
 level_all_end  @ level_all([], _) <=> true.
 
 % ==========================================================================
-% Typing rules: typeof(Level, Env, Expr, T)
+% Typing rules: typeof(GD, Env, Expr, T)
 % ==========================================================================
 %
 % Env is an association list of `bind(Name, Type)` cells. Each rule is a
@@ -130,47 +142,50 @@ level_all_end  @ level_all([], _) <=> true.
 % TF, TA below) are fresh type variables.
 
 % TODO delete?
-typeof_warn @ typeof(Level, _, Expr, _) <=> var(Level) | report_error(quote(other_error(Expr))).
 typeof_int @ typeof(_, _, lit_int(_), T) <=> unify_ty(T, tint).
 
-typeof_add @ typeof(Level, Env, add(A, B), T) <=>
-    level(TA, Level),
-    typeof(Level, Env, A, TA),
-    level(TB, Level),
-    typeof(Level, Env, B, TB),
+typeof_add @ typeof(GD, Env, add(A, B), T) <=>
+    level(TA, GD),
+    typeof(GD, Env, A, TA),
+    level(TB, GD),
+    typeof(GD, Env, B, TB),
     unify_ty(TA, tint),
     unify_ty(TB, tint),
     unify_ty(T, tint).
 
-typeof_var @ typeof(_, Env, evar(X), T) <=> lookup_ty(Env, X, T).
+typeof_var @ typeof(_, Env, evar(X, VA), T) <=> lookup_ty(Env, X, T, VA).
 
 % `Env2 = [...]` introduces the fresh argument-type variable A: a bare
 % unbound variable may not first appear nested inside a constraint tell
 % (whose arguments are evaluated), but `=` is pure unification and binds
 % the new variables in its operands.
-typeof_lam @ typeof(Level, Env, lam(X, Body), T) <=>
-    level(A, Level),
+typeof_lam @ typeof(GD, Env, lam(X, VarTy, Body), T) <=>
+    level(A, GD),
+    % TODO instead of this, put A instead of VarTy in lam.
+    VarTy = A,
     Env2 = [bind(X, mono, A) | Env],
-    level(B, Level),
-    typeof(Level, Env2, Body, B),
+    level(B, GD),
+    typeof(GD, Env2, Body, B),
     unify_ty(T, arrow(A, B)).
 
-typeof_app @ typeof(Level, Env, app(F, Arg), T) <=>
-    level(TF, Level),
-    typeof(Level, Env, F, TF),
-    level(TA, Level),
-    typeof(Level, Env, Arg, TA),
+typeof_app @ typeof(GD, Env, app(F, Arg), T) <=>
+    level(TF, GD),
+    typeof(GD, Env, F, TF),
+    level(TA, GD),
+    typeof(GD, Env, Arg, TA),
     unify_ty(TF, arrow(TA, T)).
 
-typeof_let @ typeof(Level, Env, let(X, Val, Body), T) <=>
+typeof_let @ generalization_domain(GD, Level) \ typeof(GD, Env, let(X, Val, Body), T) <=>
+    % TODO avoid having to deal with Level in this rule by having a `nested_gd` rule.
     NestedLevel is Level + 1,
-    level(A, Level),
-    typeof(NestedLevel, Env, Val, A),
-    Env2 = [bind(X, poly(Level), A) | Env],
-    typeof(Level, Env2, Body, T).
+    generalization_domain(NestedGD, NestedLevel),
+    level(A, NestedGD),
+    typeof(NestedGD, Env, Val, A),
+    Env2 = [bind(X, poly(NestedGD), A) | Env],
+    typeof(GD, Env2, Body, T).
 
 % ==========================================================================
-% Context lookup: lookup_ty(Env, Name, T)
+% Context lookup: lookup_ty(Env, Name, T, VA)
 % ==========================================================================
 %
 % The three rules are tried top-to-bottom. In the first head the repeated
@@ -178,12 +193,12 @@ typeof_let @ typeof(Level, Env, let(X, Val, Body), T) <=>
 % binding's name matches; otherwise the general second rule skips a cell.
 % Reaching the empty list means the variable was never bound.
 
-lookup_mono @ lookup_ty([bind(X, mono, Ty) | _], X, T) <=> unify_ty(T, Ty).
-lookup_poly @ lookup_ty([bind(X, poly(Level), Ty) | _], X, T) <=>
-    instantiation_domain(D, Level),
+lookup_mono @ lookup_ty([bind(X, mono, Ty) | _], X, T, VA) <=> unify_ty(T, Ty), VA = mono_var.
+lookup_poly @ lookup_ty([bind(X, poly(GD), Ty) | _], X, T, VA) <=>
+    instantiation_domain(D, VA, GD),
     instantiate_ty(D, T, Ty).
-lookup_skip @ lookup_ty([bind(_, _, _) | Rest], X, T) <=> lookup_ty(Rest, X, T).
-lookup_miss @ lookup_ty([], X, _) <=> report_error(quote(unbound_variable(X))).
+lookup_skip @ lookup_ty([bind(_, _, _) | Rest], X, T, VA) <=> lookup_ty(Rest, X, T, VA).
+lookup_miss @ lookup_ty([], X, _, VA) <=> report_error(quote(unbound_variable(X))).
 
 % ==========================================================================
 % Type unification: unify_ty(T1, T2)
@@ -209,8 +224,8 @@ unify_bad @ unify_ty(T1, T2) <=> nonvar(T1), nonvar(T2) |
 % self-application (`lam(x, app(evar(x), evar(x)))`) would otherwise create.
 bind_occurs @ bind_ty(V, Ty) <=> occurs(V, Ty) |
     report_error(quote(infinite_type(V, Ty))).
-bind_ok     @ level(V, Level) \ bind_ty(V, Ty) <=>
-    level_all(term_variables(Ty), Level),
+bind_ok     @ level(V, GD) \ bind_ty(V, Ty) <=>
+    level_all(term_variables(Ty), GD),
     V = Ty.
 
 % ==========================================================================
@@ -221,23 +236,25 @@ bind_ok     @ level(V, Level) \ bind_ty(V, Ty) <=>
 % Domain is used to make sure that an instantiated variable always instantiate to the same type.
 % instantiation_domain(Domain, Level) sets the level of the domain.
 inst_tint       @ instantiate_ty(D, T, tint) <=> unify_ty(T, tint).
-inst_arrow      @ instantiation_domain(D, Level) \ instantiate_ty(D, T, arrow(A, B)) <=>
-    level(TA, Level),
+inst_arrow      @ instantiation_domain(D, _, _), level(T, T_GD) \ instantiate_ty(D, T, arrow(A, B)) <=>
+    level(TA, T_GD),
     instantiate_ty(D, TA, A),
-    level(TB, Level),
+    level(TB, T_GD),
     instantiate_ty(D, TB, B),
     unify_ty(T, arrow(TA, TB)).
-inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
-inst_direct     @ instantiation_domain(D, DomainLevel), level(V, VarLevel) \
+% TODO [collect] re-introduce inst_error, after making sure that Ty=tvar(_, _) is impossible
+% (TODO) idea is: collect_gd (collects gd_args) -> start_let_type_args -> number_gd_args (which will use assign_tvars)
+% inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
+inst_direct     @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), level(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
     instantiate_ty(D, T, V) <=>
     DomainLevel > VarLevel |
     V = T.
 % TODO this should not happen
-inst_level_high @ instantiation_domain(D, DomainLevel), level(V, VarLevel) \
+inst_level_high @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), level(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
     instantiate_ty(D, T, V) <=>
     DomainLevel < VarLevel |
     report_error(quote(inst_level_high)).
-inst_singleton  @ instantiate_ty(D, T1, V), instantiate_ty(D, T2, V) <=>
+inst_singleton  @ instantiate_ty(D, T1, V) \ instantiate_ty(D, T2, V) <=>
     unify_ty(T1, T2).
 
 % ==========================================================================
@@ -256,6 +273,7 @@ collect_es @ collect(Out), errors(Es) <=> Out = Es.
 % ==========================================================================
 
 % occurs(V, Ty): does the unbound variable V appear anywhere in Ty? Only
+% TODO update doc
 % ever called on pre-`number_vars` types, whose leaves are `tint` or
 % unbound variables, so the `arrow` recursion covers every compound case.
 :- function occurs/2.
@@ -265,14 +283,36 @@ occurs(V, arrow(A, B)) | occurs(V, A) -> true.
 occurs(V, arrow(A, B)) -> occurs(V, B).
 occurs(_, _) -> false.
 
-% number_vars(T): replace every residual (still unbound) type variable in T
-% with a distinct `tvar(N)`, numbered from 0 in first-occurrence order.
-% `term_variables` yields each variable once, and its elements are the very
-% variables inside T, so unifying them preserves sharing.
-number_vars(T) <=> Vs is term_variables(T), assign_tvars(Vs, 0).
+number_gd @ start_numbering \ generalization_domain(GD, Level) <=>
+    gd_args(GD, Args),
+    number_domain(GD, Level, 0, Args).
 
-assign_nil  @ assign_tvars([], _) <=> true.
-assign_cons @ assign_tvars([V | Vs], N) <=>
-    V = tvar(N),
+number_tvar @ number_domain(GD, Level, Number, Args), level(Var, GD) <=>
+    Var = tvar(Level, Number),
+    % TODO I think doing it like this causes a lot of re-activations.
+    % \ We can instead pass an empty list in `number_gd`, with each `number_tvar` prepending to it, and `number_end` adding a `gd_args`
+    % (Also, it won't be number_*, but rather collect_*, see TODO comment [collect]) (may change name, since there is a `collect` rule)
+    Args = [Var | Rest],
+    NextNumber is Number + 1,
+    number_domain(GD, Level, NextNumber, Rest).
+
+number_end  @ number_domain(GD, _, _, Args) <=>
+    % TODO maybe also record length of Args?
+    Args = [].
+
+% TODO change to another prefix instead of typaram
+typaram_let @ start_let_type_args, gd_args(GD, Args) \ instantiation_domain(D, VA, GD) <=>
+    VA = poly_var(A),
+    let_type_args(D, A, Args).
+
+typaram_var @ let_type_args(D, A, [Arg | Args]) \ instantiate_ty(D, Var, Arg) <=>
+    A = [Var | B],
+    let_type_args(D, B, Args).
+
+typaram_end @ let_type_args(D, A, []) <=> A = [].
+
+assign_nil  @ assign_tvars([], _, _) <=> true.
+assign_cons @ assign_tvars([V | Vs], Level, N) <=>
+    V = tvar(Level, N),
     N1 is N + 1,
-    assign_tvars(Vs, N1).
+    assign_tvars(Vs, Level, N1).

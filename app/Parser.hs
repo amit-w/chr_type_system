@@ -16,12 +16,16 @@ module Parser
   )
 where
 
+import Data.Functor.Const (Const (..))
 import Data.Text qualified as T
-import Syntax (Expr (..))
+import Syntax (GenExpr (..))
+import HFunctor (Apply (..))
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
 import Text.Parsec.Token qualified as Tok
+
+type Expr = GenExpr (Const ())
 
 -- | Parse a single expression, or return a human-readable error.
 parseExpr :: String -> Either String Expr
@@ -65,6 +69,9 @@ natural = Tok.natural lexer
 expr :: Parser Expr
 expr = lambda <|> letExpr <|> addExpr
 
+unit :: Apply loc (Const ())
+unit = Apply (Const ())
+
 -- @\x y. e@ is sugar for @\x. \y. e@.
 lambda :: Parser Expr
 lambda = do
@@ -72,7 +79,7 @@ lambda = do
   vars <- many1 identifier
   reservedOp "."
   body <- expr
-  pure (foldr Lam body vars)
+  pure (foldr (Lam unit) body vars)
 
 letExpr :: Parser Expr
 letExpr = do
@@ -93,5 +100,5 @@ appExpr = foldl1 App <$> many1 atom
 atom :: Parser Expr
 atom =
   parens expr
-    <|> (Var <$> identifier)
+    <|> (Var unit <$> identifier)
     <|> (IntLit <$> natural)

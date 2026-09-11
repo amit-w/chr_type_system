@@ -2,20 +2,27 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DefaultSignatures #-}
 
-module HFunctor where
+module HFunctor
+  ( Apply (..),
+    HFunctor (..),
+    HFoldable (..),
+    HTraversable (..)
+  ) where
 
 import Data.Kind (Type)
 import Data.Singletons (SingI (..))
 import GHC.Generics
-  ( K1 (K1),
+  ( Generic1 (Rep1, from1, to1),
+    K1 (K1),
     M1 (M1),
     Rec1 (Rec1),
     type (:*:) (..),
-    type (:+:) (..), Generic1 (from1, to1, Rep1), 
+    type (:+:) (..),
   )
 
 -- Apply
 data Apply x f = Apply { getApply :: f x }
+  deriving (Eq, Show)
 
 -- HFunctor
 class HFunctor (t :: (k -> Type) -> Type) where

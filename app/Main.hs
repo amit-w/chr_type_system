@@ -1,5 +1,8 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | An end-to-end example of embedding a CHR module in a Haskell program.
 --
@@ -20,12 +23,17 @@ module Main (main) where
 
 import Control.Monad (forM_, when)
 import Data.Char (isSpace)
+import Data.Functor.Const (Const (..))
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (intercalate)
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Data.Text qualified as T
+import Data.Map (Map)
+import Data.Singletons (SingI (..))
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
+import HFunctor (HTraversable (htraverse))
 import Parser (parseExpr)
-import Syntax (Expr)
+import Syntax (GenExpr (..), Loc (..), SLoc (..))
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO
@@ -44,14 +52,17 @@ import YCHR
     FromTerm (..),
     Name (..),
     Term (..),
+    ToTerm,
     argAt,
     compileModules,
     compound,
     decodeSum,
+    decodeVar,
     displayError,
-    runQueryCompiled,
+    runQueryCompiledWith,
     toTerm,
   )
+import YCHR.Convert qualified
 
 -- ---------------------------------------------------------------------------
 -- Decoding the result
@@ -60,7 +71,7 @@ import YCHR
 data Type
   = TInt
   | TArrow Type Type
-  | TVar Int
+  | TVar Int Int
 
 -- | Decode a @ty@ term. The functor is matched on its local name, so the
 -- module-qualified @stlc:arrow@ that comes back still decodes.
@@ -69,7 +80,7 @@ instance FromTerm Type where
     decodeSum
       [ ("tint", 0, \_ -> Right TInt),
         ("arrow", 2, \as -> TArrow <$> argAt 0 as <*> argAt 1 as),
-        ("tvar", 1, \as -> TVar <$> argAt 0 as)
+        ("tvar", 2, \as -> TVar <$> argAt 0 as <*> argAt 1 as)
       ]
 
 -- | The inferencer answers with @ok(Type)@ or @type_error(Errors)@. The
@@ -107,20 +118,59 @@ loadInferencer path =
       Left err -> fail ("could not compile " ++ stlcPath ++ ":\n" ++ displayError err)
       Right (chrSource, _warnings) -> pure chrSource
 
+newtype ChrVar = ChrVar {varName :: Text}
+  deriving (Eq, Show)
+
+instance ToTerm ChrVar where
+  toTerm v = VarTerm v.varName
+
+type NumberedExpr = GenExpr (Const ChrVar)
+
+freshVariable :: IORef Integer -> IO ChrVar
+freshVariable numberRef = do
+  modifyIORef' numberRef (+ 1)
+  ChrVar . indexToVarName <$> readIORef numberRef
+  where
+    indexToVarName :: Integer -> Text
+    indexToVarName = ("Var" <>) . pack . show
+
+data family TypeAnnotations (loc :: Loc)
+newtype instance TypeAnnotations LocLam = ArgType { getType :: Type }
+data instance TypeAnnotations LocVar = Mono | Poly [Type]
+
+type TypedExpr = GenExpr TypeAnnotations
+
+data TryTypedExpr
+  = Typed TypedExpr
+  | Failed (GenExpr (Const Term))
+
 -- | Parse, type-check, and render one line of surface syntax.
 inferLine :: CompiledProgram -> String -> IO String
 inferLine cp line = case parseExpr line of
   Left err -> pure ("parse error: " ++ firstLine err)
   Right e -> do
-    result <- runQueryCompiled cp (typecheckGoal e) "Result"
-    pure (either show renderResult result)
+    numberRef <- newIORef 0
+    e' <- htraverse (const $ Const <$> freshVariable numberRef) e
+    result <- runQueryCompiledWith cp (typecheckGoal e') (decodeResult e')
+    pure (either (\err -> "convert error: " ++ show err) (\(typedExpr :: TryTypedExpr, exprType :: TCResult) -> renderResult exprType) result)
+
+decodeResult :: NumberedExpr -> Map Text Term -> Either YCHR.Convert.ConvertError (TryTypedExpr, TCResult)
+decodeResult e varMap = liftA2 (,) (either (const $ Failed <$> failedTypedExpr) (Right . Typed) typedExpr) (decodeVar "Result" varMap)
+  where
+    typedExpr = htraverse (decodeAnnotation varMap) e
+    failedTypedExpr = htraverse (\var -> Const <$> decodeVar var.getConst.varName varMap) e
+
+decodeAnnotation :: forall x. (SingI x) => Map Text Term -> Const ChrVar x -> Either YCHR.Convert.ConvertError (TypeAnnotations x)
+decodeAnnotation varMap chrVar = case sing @x of
+  SLocVar -> decodeSum [("mono_var", 0, const (Right Mono)), ("poly_var", 1, \as -> fmap Poly (argAt 0 as))] =<< (decodeVar chrVar.getConst.varName varMap)
+  SLocLam -> fmap ArgType (decodeVar chrVar.getConst.varName varMap)
 
 -- | Build the goal @typecheck(<expr>, Result)@. The encoded expression
 -- needs no quoting: @expr@ is a declared, exported type, so the goal's
 -- bare @evar@ \/ @lam@ \/ ... references are canonicalized to
 -- @stlc:evar@, @stlc:lam@, ... — the same form the rule heads match,
 -- and data rather than function calls.
-typecheckGoal :: Expr -> Term
+typecheckGoal :: NumberedExpr -> Term
 typecheckGoal e = compound "typecheck" [toTerm e, VarTerm "Result"]
 
 -- ---------------------------------------------------------------------------
@@ -191,7 +241,8 @@ renderResult (Ill errs) = "TYPE ERROR: " ++ intercalate "; " (map describeError 
 
 renderType :: Bool -> Type -> String
 renderType _ TInt = "int"
-renderType _ (TVar n) = tyVarName n
+-- This is kinda the worst of all worlds
+renderType _ (TVar level n) = tyVarName n ++ "@" ++ show level
 renderType paren (TArrow a b) =
   parenthesize paren (renderType True a ++ " -> " ++ renderType False b)
 
