@@ -48,23 +48,22 @@ build-type:         Simple
 -- Extra doc files to be distributed with the package, such as a CHANGELOG or a README.
 extra-doc-files:    CHANGELOG.md
 
--- Extra source files to be distributed with the package, such as examples, or a tutorial module.
--- extra-source-files:
-
-common deps
-    build-depends:    base >=4.18 && <4.22
+common common
+    build-depends:    base ^>=4.20.2.0
                     , containers >=0.6 && <0.9
                     , filepath >=1.4 && <1.6
                     , mtl == 2.3.2
+                    , singletons == 3.0.4
                     , text >=2.0 && <2.2
+                    , ychr == 0.1.0.0
 
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
 
-common warnings
     ghc-options: -Wall
 
 library
-    -- Import common warning flags.
-    import:           warnings, deps
+    import:           common
 
     exposed-modules:
       , Data.HFunctor
@@ -74,14 +73,8 @@ library
       , Language.Lambda.Parser
       , YCHR.Convert.DecodeM
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
-
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.20.2.0
-                    , parsec >=3.1 && <3.2
-                    , singletons == 3.0.4
-                    , ychr == 0.1.0.0
+    build-depends:    parsec >=3.1 && <3.2
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -91,7 +84,7 @@ library
 
 executable chr-type-system
     -- Import common warning flags.
-    import:           warnings, deps
+    import:           common
 
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
@@ -101,18 +94,9 @@ executable chr-type-system
         Embed
       , Render
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
-
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.20.2.0
-                    -- TODO maybe we don't need this?
-                    , parsec >=3.1 && <3.2
+    build-depends:    chr-type-system == 0.1.0.0
                     , unix == 2.8.8.0
-                    , ychr == 0.1.0.0
-                    , singletons == 3.0.4
-                    , mtl == 2.3.2
-                    , chr-type-system == 0.1.0.0
 
     -- Directories containing source files.
     hs-source-dirs:   app
