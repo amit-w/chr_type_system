@@ -11,19 +11,21 @@
 --
 -- Application binds tighter than @+@, so @f x + 1@ is @(f x) + 1@; a lambda
 -- body runs as far right as possible, so @\\x. x + 1@ is @\\x. (x + 1)@.
-module Parser
-  ( parseExpr,
+module Language.Lambda.Parser
+  ( Expr,
+    parseExpr,
   )
 where
 
 import Data.Functor.Const (Const (..))
 import Data.Text qualified as T
-import Syntax (GenExpr (..))
-import HFunctor (Apply (..))
+
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
 import Text.Parsec.Token qualified as Tok
+
+import Language.Lambda.Syntax (GenExpr (..))
 
 type Expr = GenExpr (Const ())
 
@@ -69,8 +71,8 @@ natural = Tok.natural lexer
 expr :: Parser Expr
 expr = lambda <|> letExpr <|> addExpr
 
-unit :: Apply loc (Const ())
-unit = Apply (Const ())
+unit :: Const () x
+unit = Const ()
 
 -- @\x y. e@ is sugar for @\x. \y. e@.
 lambda :: Parser Expr

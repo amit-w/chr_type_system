@@ -44,4 +44,4 @@ readChrSource chrSource = do
 -- splices with the cabal package directory as cwd). Also surfaced in
 -- compile diagnostics.
 stlcPath :: FilePath
-stlcPath = "app/stlc.chr"
+stlcPath = "chr_files/typecheck.chr"

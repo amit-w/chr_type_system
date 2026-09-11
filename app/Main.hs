@@ -22,17 +22,12 @@
 module Main (main) where
 
 import Control.Monad (forM_, when)
+import Control.Monad.State (evalState, State, modify, MonadState (get))
+import Control.Monad.Reader (ReaderT(runReaderT))
 import Data.Char (isSpace)
 import Data.Functor.Const (Const (..))
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (intercalate)
-import Data.Text (Text, pack)
-import Data.Text qualified as T
-import Data.Singletons (SingI (..))
-import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
-import HFunctor (HTraversable (htraverse), Apply (Apply))
-import Parser (parseExpr)
-import Syntax (GenExpr (..), Loc (..), SLoc (..))
+
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO
@@ -46,6 +41,11 @@ import System.IO
     stdin,
     stdout,
   )
+
+import Data.Text (Text, pack)
+import Data.Text qualified as T
+import Data.Singletons (SingI (..))
+
 import YCHR
   ( CompiledProgram,
     FromTerm (..),
@@ -59,8 +59,13 @@ import YCHR
     displayError,
     runQueryCompiledWith,
     toTerm,
+    ConvertError,
   )
-import Control.Monad.Reader (ReaderT(runReaderT))
+
+import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
+import Data.HTraversable (HTraversable (htraverse))
+import Language.Lambda.Parser (parseExpr, Expr)
+import Language.Lambda.Syntax (GenExpr (..), Loc (..), SLoc (..))
 
 import DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
 import Render 
@@ -127,13 +132,15 @@ instance ToTerm ChrVar where
 
 type NumberedExpr = GenExpr (Const ChrVar)
 
-freshVariable :: IORef Integer -> IO ChrVar
-freshVariable numberRef = do
-  modifyIORef' numberRef (+ 1)
-  ChrVar . indexToVarName <$> readIORef numberRef
-  where
-    indexToVarName :: Integer -> Text
-    indexToVarName = ("Var" <>) . pack . show
+numberExpr :: Expr -> NumberedExpr
+numberExpr e = evalState (htraverse (const freshVariable) e) 0 where
+  freshVariable :: State Int (Const ChrVar x)
+  freshVariable = do
+    modify (+ 1)
+    Const . ChrVar . indexToVarName <$> get
+
+  indexToVarName :: Int -> Text
+  indexToVarName = ("Var" <>) . pack . show
 
 data family TypeAnnotations (loc :: Loc)
 newtype instance TypeAnnotations LocLam = ArgType { getType :: Type }
@@ -145,14 +152,17 @@ data TryTypedExpr
   = Typed TypedExpr
   | Failed (GenExpr (Const Term))
 
+typecheck :: CompiledProgram -> Expr -> IO (Either ConvertError (TryTypedExpr, TCResult))
+typecheck cp e =
+  let e' = numberExpr e
+  in runQueryCompiledWith cp (typecheckGoal e') (decodeResult e').runReaderT
+
 -- | Parse, type-check, and render one line of surface syntax.
 inferLine :: CompiledProgram -> String -> IO String
 inferLine cp line = case parseExpr line of
   Left err -> pure ("parse error: " ++ firstLine err)
   Right e -> do
-    numberRef <- newIORef 0
-    e' <- htraverse (const $ Const <$> freshVariable numberRef) e
-    result <- runQueryCompiledWith cp (typecheckGoal e') (decodeResult e').runReaderT
+    result <- typecheck cp e
     pure (either (\err -> "convert error: " ++ show err) (\(typedExpr :: TryTypedExpr, exprType :: TCResult) -> renderResult exprType ++ "\n" ++ renderTryExpr typedExpr) result)
 
 decodeChrVar :: FromTerm a => Const ChrVar x -> DecodeM a
@@ -293,15 +303,15 @@ renderTryExpr (Typed typedExpr) = runRender $ renderExpr typedExpr
 renderTryExpr (Failed term) = show term
 
 renderExpr :: GenExpr TypeAnnotations -> Render
-renderExpr (Lam (Apply (ArgType ty)) v e) = withPrec 1 $ mconcat [
+renderExpr (Lam (ArgType ty) v e) = withPrec 1 $ mconcat [
     "\\",
     paren $ mconcat [renderText v, ": ", renderString (renderType False ty)],
     ". ",
     renderExpr e
   ]
 renderExpr (App l r) = withPrec 7 $ renderExpr l <> " " <> noAssoc (renderExpr r)
-renderExpr (Var (Apply Mono) v) = renderText v
-renderExpr (Var (Apply (Poly ts)) v) = mconcat [
+renderExpr (Var Mono v) = renderText v
+renderExpr (Var (Poly ts) v) = mconcat [
     renderText v,
     " @",
     paren (foldMap (renderString . renderType True) ts)

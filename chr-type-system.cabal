@@ -61,6 +61,32 @@ common deps
 common warnings
     ghc-options: -Wall
 
+library
+    -- Import common warning flags.
+    import:           warnings, deps
+
+    exposed-modules:
+      , Data.HFunctor
+      , Data.HFoldable
+      , Data.HTraversable
+      , Language.Lambda.Syntax
+      , Language.Lambda.Parser
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+
+    -- Other library packages from which modules are imported.
+    build-depends:    base ^>=4.20.2.0
+                    , parsec >=3.1 && <3.2
+                    , singletons == 3.0.4
+                    , ychr == 0.1.0.0
+
+    -- Directories containing source files.
+    hs-source-dirs:   src
+
+    -- Base language which the package is written in.
+    default-language: GHC2021
+
 executable chr-type-system
     -- Import common warning flags.
     import:           warnings, deps
@@ -71,9 +97,6 @@ executable chr-type-system
     -- Modules included in this executable, other than Main.
     other-modules:
         Embed
-      , Syntax
-      , Parser
-      , HFunctor
       , DecodeM
       , Render
 
@@ -82,11 +105,13 @@ executable chr-type-system
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.20.2.0
+                    -- TODO maybe we don't need this?
                     , parsec >=3.1 && <3.2
                     , unix == 2.8.8.0
                     , ychr == 0.1.0.0
                     , singletons == 3.0.4
                     , mtl == 2.3.2
+                    , chr-type-system == 0.1.0.0
 
     -- Directories containing source files.
     hs-source-dirs:   app
