@@ -30,7 +30,7 @@ import Data.Text (Text, pack)
 import Data.Text qualified as T
 import Data.Singletons (SingI (..))
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
-import HFunctor (HTraversable (htraverse))
+import HFunctor (HTraversable (htraverse), Apply (Apply))
 import Parser (parseExpr)
 import Syntax (GenExpr (..), Loc (..), SLoc (..))
 import System.Environment (getArgs)
@@ -60,8 +60,10 @@ import YCHR
     runQueryCompiledWith,
     toTerm,
   )
-import DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
 import Control.Monad.Reader (ReaderT(runReaderT))
+
+import DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
+import Render 
 
 -- ---------------------------------------------------------------------------
 -- Decoding the result
@@ -151,7 +153,7 @@ inferLine cp line = case parseExpr line of
     numberRef <- newIORef 0
     e' <- htraverse (const $ Const <$> freshVariable numberRef) e
     result <- runQueryCompiledWith cp (typecheckGoal e') (decodeResult e').runReaderT
-    pure (either (\err -> "convert error: " ++ show err) (\(typedExpr :: TryTypedExpr, exprType :: TCResult) -> renderResult exprType) result)
+    pure (either (\err -> "convert error: " ++ show err) (\(typedExpr :: TryTypedExpr, exprType :: TCResult) -> renderResult exprType ++ "\n" ++ renderTryExpr typedExpr) result)
 
 decodeChrVar :: FromTerm a => Const ChrVar x -> DecodeM a
 decodeChrVar chrVar = decodeVarM chrVar.getConst.varName
@@ -250,8 +252,8 @@ renderType :: Bool -> Type -> String
 renderType _ TInt = "int"
 -- This is kinda the worst of all worlds
 renderType _ (TVar level n) = tyVarName n ++ "@" ++ show level
-renderType paren (TArrow a b) =
-  parenthesize paren (renderType True a ++ " -> " ++ renderType False b)
+renderType shouldParen (TArrow a b) =
+  parenthesize shouldParen (renderType True a ++ " -> " ++ renderType False b)
 
 -- | Render a type that is still a raw 'Term' (as it appears inside an
 -- error), tolerating the unbound variables an in-progress inference leaves
@@ -285,6 +287,35 @@ describeError t = case t of
   CompoundTerm my_error [] | my_error == Unqualified "my_error" -> "my_error"
   CompoundTerm other_error [expr] | other_error == Unqualified "other_error" -> "other_error: " ++ show expr
   _ -> "?"
+
+renderTryExpr :: TryTypedExpr -> String
+renderTryExpr (Typed typedExpr) = runRender $ renderExpr typedExpr
+renderTryExpr (Failed term) = show term
+
+renderExpr :: GenExpr TypeAnnotations -> Render
+renderExpr (Lam (Apply (ArgType ty)) v e) = withPrec 1 $ mconcat [
+    "\\",
+    paren $ mconcat [renderText v, ": ", renderString (renderType False ty)],
+    ". ",
+    renderExpr e
+  ]
+renderExpr (App l r) = withPrec 7 $ renderExpr l <> " " <> noAssoc (renderExpr r)
+renderExpr (Var (Apply Mono) v) = renderText v
+renderExpr (Var (Apply (Poly ts)) v) = mconcat [
+    renderText v,
+    " @",
+    paren (foldMap (renderString . renderType True) ts)
+  ]
+renderExpr (Let v e1 e2) = withPrec 2 $ mconcat [
+    "let",
+    renderText v,
+    " = ",
+    restartPrec (renderExpr e1),
+    " in ",
+    renderExpr e2
+  ]
+renderExpr (IntLit n) = renderString $ show n
+renderExpr (Add l r) = withPrec 3 $ renderExpr l <> " + " <> renderExpr r
 
 -- ---------------------------------------------------------------------------
 -- Small helpers

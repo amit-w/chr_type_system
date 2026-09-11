@@ -75,6 +75,7 @@ executable chr-type-system
       , Parser
       , HFunctor
       , DecodeM
+      , Render
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
