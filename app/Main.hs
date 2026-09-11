@@ -28,7 +28,6 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (intercalate)
 import Data.Text (Text, pack)
 import Data.Text qualified as T
-import Data.Map (Map)
 import Data.Singletons (SingI (..))
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
 import HFunctor (HTraversable (htraverse))
@@ -57,12 +56,12 @@ import YCHR
     compileModules,
     compound,
     decodeSum,
-    decodeVar,
     displayError,
     runQueryCompiledWith,
     toTerm,
   )
-import YCHR.Convert qualified
+import DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
+import Control.Monad.Reader (ReaderT(runReaderT))
 
 -- ---------------------------------------------------------------------------
 -- Decoding the result
@@ -151,19 +150,27 @@ inferLine cp line = case parseExpr line of
   Right e -> do
     numberRef <- newIORef 0
     e' <- htraverse (const $ Const <$> freshVariable numberRef) e
-    result <- runQueryCompiledWith cp (typecheckGoal e') (decodeResult e')
+    result <- runQueryCompiledWith cp (typecheckGoal e') (decodeResult e').runReaderT
     pure (either (\err -> "convert error: " ++ show err) (\(typedExpr :: TryTypedExpr, exprType :: TCResult) -> renderResult exprType) result)
 
-decodeResult :: NumberedExpr -> Map Text Term -> Either YCHR.Convert.ConvertError (TryTypedExpr, TCResult)
-decodeResult e varMap = liftA2 (,) (either (const $ Failed <$> failedTypedExpr) (Right . Typed) typedExpr) (decodeVar "Result" varMap)
-  where
-    typedExpr = htraverse (decodeAnnotation varMap) e
-    failedTypedExpr = htraverse (\var -> Const <$> decodeVar var.getConst.varName varMap) e
+decodeChrVar :: FromTerm a => Const ChrVar x -> DecodeM a
+decodeChrVar chrVar = decodeVarM chrVar.getConst.varName
 
-decodeAnnotation :: forall x. (SingI x) => Map Text Term -> Const ChrVar x -> Either YCHR.Convert.ConvertError (TypeAnnotations x)
-decodeAnnotation varMap chrVar = case sing @x of
-  SLocVar -> decodeSum [("mono_var", 0, const (Right Mono)), ("poly_var", 1, \as -> fmap Poly (argAt 0 as))] =<< (decodeVar chrVar.getConst.varName varMap)
-  SLocLam -> fmap ArgType (decodeVar chrVar.getConst.varName varMap)
+decodeResult :: NumberedExpr -> DecodeM (TryTypedExpr, TCResult)
+decodeResult e = liftA2 (,) (typedExpr `orElse` failedTypedExpr) (decodeVarM "Result")
+  where
+    typedExpr = Typed <$> htraverse decodeAnnotation e
+    failedTypedExpr = Failed <$> htraverse (\var -> Const <$> decodeChrVar var) e
+
+decodeAnnotation :: forall x. (SingI x) => Const ChrVar x -> DecodeM (TypeAnnotations x)
+decodeAnnotation chrVar = case sing @x of
+  SLocVar -> do
+    term <- decodeChrVar chrVar
+    decodeSumM
+      [ ("mono_var", 0, const (pure Mono)),
+        ("poly_var", 1, \as -> fmap Poly (argAtM 0 as))
+      ] term
+  SLocLam -> ArgType <$> decodeChrVar chrVar
 
 -- | Build the goal @typecheck(<expr>, Result)@. The encoded expression
 -- needs no quoting: @expr@ is a declared, exported type, so the goal's
