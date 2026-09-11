@@ -2,7 +2,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module DecodeM (
+module YCHR.Convert.DecodeM (
   DecodeM,
   decodeVarM,
   decodeSumM,
@@ -10,19 +10,19 @@ module DecodeM (
   orElse,
 ) where
 
+import Control.Monad.Reader (ReaderT (..))
+import Control.Monad.Except (catchError)
 import Data.Text (Text)
 import Data.Map (Map)
 
-import YCHR
+import YCHR (Term)
+import YCHR.Convert
   ( FromTerm (..),
-    Term (..),
+    ConvertError,
     argAt,
     decodeSum,
     decodeVar,
   )
-import YCHR.Convert (ConvertError)
-import Control.Monad.Reader (ReaderT (..))
-import Control.Monad.Except (catchError)
 
 type DecodeM = ReaderT (Map Text Term) (Either ConvertError)
 

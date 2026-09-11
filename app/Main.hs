@@ -62,12 +62,14 @@ import YCHR
     ConvertError,
   )
 
-import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
 import Data.HTraversable (HTraversable (htraverse))
+
+import YCHR.Convert.DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
+
 import Language.Lambda.Parser (parseExpr, Expr)
 import Language.Lambda.Syntax (GenExpr (..), Loc (..), SLoc (..))
 
-import DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
+import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
 import Render 
 
 -- ---------------------------------------------------------------------------
