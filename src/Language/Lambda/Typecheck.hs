@@ -67,6 +67,7 @@ data Type
   = TInt
   | TArrow Type Type
   | TVar Int Int
+  deriving (Eq)
 
 -- | Decode a @ty@ term. The functor is matched on its local name, so the
 -- module-qualified @stlc:arrow@ that comes back still decodes.

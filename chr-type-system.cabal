@@ -74,9 +74,11 @@ library
         , Data.HFunctor
         , Data.HFoldable
         , Data.HTraversable
+        , Data.Validation
         , Language.Lambda.Parser
         , Language.Lambda.Syntax
         , Language.Lambda.Typecheck
+        , Language.Lambda.Typecheck.Sanity
         , YCHR.Convert.DecodeM
 
     -- Other library packages from which modules are imported.

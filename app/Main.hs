@@ -20,6 +20,7 @@ module Main (main) where
 import Control.Monad (forM_, when)
 import Data.Char (isSpace)
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
@@ -54,6 +55,7 @@ import Language.Lambda.Typecheck
       TCResult(..),
       Type(..),
       typecheck )
+import Language.Lambda.Typecheck.Sanity qualified as Sanity
 
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
 import Render
@@ -96,8 +98,7 @@ inferLine cp line = case parseExpr line of
     result <- typecheck cp e
     pure $ case result of
       Left err -> show err
-      Right (typedExpr, exprType) -> renderResult exprType ++ "\n" ++ renderTryExpr typedExpr
-        
+      Right (typedExpr, exprType) -> renderResult typedExpr exprType
 
 -- ---------------------------------------------------------------------------
 -- REPL
@@ -161,9 +162,18 @@ demoInputs =
 -- Rendering
 -- ---------------------------------------------------------------------------
 
-renderResult :: TCResult -> String
-renderResult (Ok t) = renderType False t
-renderResult (Ill errs) = "TYPE ERROR: " ++ intercalate "; " (map describeError errs)
+renderResult :: TryTypedExpr -> TCResult -> String
+renderResult tryTypedExpr tcResult = renderTCResult tcResult ++ "\n" ++ renderTryExpr tryTypedExpr ++ renderSanity tryTypedExpr tcResult
+
+renderSanity :: TryTypedExpr -> TCResult -> String
+renderSanity (Typed typedExpr) (Ok exprType) =
+  let sanityErrs = fromMaybe [] $ Sanity.check typedExpr exprType
+  in concatMap (('\n' :) . describeSanityTCError) sanityErrs
+renderSanity _ _ = ""
+
+renderTCResult :: TCResult -> String
+renderTCResult (Ok t) = renderType False t
+renderTCResult (Ill errs) = "TYPE ERROR: " ++ intercalate "; " (map describeError errs)
 
 renderType :: Bool -> Type -> String
 renderType _ TInt = "int"
@@ -233,6 +243,26 @@ renderExpr (Let v e1 e2) = withPrec 2 $ mconcat [
   ]
 renderExpr (IntLit n) = renderString $ show n
 renderExpr (Add l r) = withPrec 3 $ renderExpr l <> " + " <> renderExpr r
+
+describeSanityTCError :: Sanity.Error -> String
+describeSanityTCError Sanity.TypeMismatch { Sanity.expected , Sanity.actual } = mconcat [
+  "expected: ", renderType False expected, ", found: ", renderType False actual, "."
+  ]
+describeSanityTCError Sanity.ExpectedArrow { Sanity.actual } = mconcat [
+  "expected a function type, found: ", renderType False actual, "."
+  ]
+describeSanityTCError Sanity.NotInScope { Sanity.varName } = mconcat [
+  "not in scope: ", T.unpack varName
+  ]
+describeSanityTCError (Sanity.VarSortMismatch varName mismatchKind) = mconcat [
+  "var sort mismatch in ", T.unpack varName, ". var is: ", expected, ", used as: ", actual, "."
+  ] where
+    (expected, actual) = case mismatchKind of
+      Sanity.VarIsMono -> ("mono", "poly")
+      Sanity.VarIsPoly -> ("poly", "mono")
+describeSanityTCError (Sanity.NotEnoughTypeParams index len) = mconcat [
+  "not enough type parameters. accessed index ", show index, ", while there are only ", show len, " type parameters."
+  ]
 
 -- ---------------------------------------------------------------------------
 -- Small helpers
