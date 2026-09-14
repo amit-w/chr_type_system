@@ -78,9 +78,8 @@ main = do
   args <- getArgs
   chrSource <- loadInferencer stlcPath
   case args of
-    ["--demo"] -> runDemo =<< readChrSource chrSource
     [] -> runRepl chrSource
-    _ -> hPutStrLn stderr ("usage: " ++ progName ++ " [--demo]") >> exitFailure
+    _ -> hPutStrLn stderr ("usage: " ++ progName) >> exitFailure
 
 -- | Compile the embedded inferencer once; reuse it across every query.
 loadInferencer :: FilePath -> IO (ChrSource CompiledProgram)
@@ -138,13 +137,7 @@ runRepl chrSource = do
 -- Demo table
 -- ---------------------------------------------------------------------------
 
-runDemo :: CompiledProgram -> IO ()
-runDemo cp = do
-  putStrLn "Curry-style STLC type inference (via a CHR module):\n"
-  forM_ demoInputs $ \s -> do
-    rendered <- inferLine cp s
-    putStrLn (pad 26 s ++ " :  " ++ firstLine rendered)
-
+-- NOTE: Not deleting this to remind myself to add tests from these
 demoInputs :: [String]
 demoInputs =
   [ "\\x. x + 1",
@@ -281,13 +274,5 @@ parenthesize :: Bool -> String -> String
 parenthesize True s = "(" ++ s ++ ")"
 parenthesize False s = s
 
-pad :: Int -> String -> String
-pad w s = s ++ replicate (max 1 (w - length s)) ' '
-
 strip :: String -> String
 strip = f . f where f = reverse . dropWhile isSpace
-
--- | Collapse a multi-line parse-error message to its first non-empty line
--- so the REPL prints one tidy line.
-firstLine :: String -> String
-firstLine = unwords . filter (not . null) . map strip . lines
