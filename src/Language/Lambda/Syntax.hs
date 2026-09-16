@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | The object language shared by the parser and the driver. Kept in its
 -- own module so "Parser" and "Main" can both import it without a cycle;
@@ -72,7 +73,7 @@ pattern Lam :: f LocLam -> Text -> GenExpr f -> GenExpr f
 pattern Lam argType argName body = LamA (Apply argType) argName body
 
 deriving instance (Eq a) => Eq (GenExpr (Const a))
-deriving instance (Show a) => Show (GenExpr (Const a))
+deriving instance (Show (f LocLam), Show (f LocVar)) => Show (GenExpr f)
 instance (HFunctor GenExpr)
 instance (HFoldable GenExpr)
 instance (HTraversable GenExpr)

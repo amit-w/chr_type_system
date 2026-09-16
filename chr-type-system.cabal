@@ -99,8 +99,11 @@ executable chr-type-system
 
     -- Modules included in this executable, other than Main.
     other-modules:
-      , Embed
-      , Render
+        , Embed
+        , PrettyPrint
+        , Render
+        , ReplError
+
 
     -- Other library packages from which modules are imported.
     build-depends:    chr-type-system == 0.1.0.0

@@ -67,7 +67,7 @@ data Type
   = TInt
   | TArrow Type Type
   | TVar Int Int
-  deriving (Eq)
+  deriving (Eq, Show)
 
 -- | Decode a @ty@ term. The functor is matched on its local name, so the
 -- module-qualified @stlc:arrow@ that comes back still decodes.
@@ -95,13 +95,16 @@ instance FromTerm TCResult where
 
 data family TypeAnnotations (loc :: Loc)
 newtype instance TypeAnnotations LocLam = ArgType { getType :: Type }
+  deriving (Show)
 data instance TypeAnnotations LocVar = Mono | Poly [Type]
+  deriving (Show)
 
 type TypedExpr = GenExpr TypeAnnotations
 
 data TryTypedExpr
   = Typed TypedExpr
   | Failed (GenExpr (Const Term))
+  deriving (Show)
 
 -- ---------------------------------------------------------------------------
 -- typechecking

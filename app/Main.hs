@@ -17,10 +17,12 @@
 -- > cabal run stlc-typechecker -- --demo  # demo table
 module Main (main) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (when)
+import Control.Exception (throwIO, Exception (..), catch, annotateIO, ExceptionWithContext (ExceptionWithContext))
+import Control.Exception.Annotation (ExceptionAnnotation (displayExceptionAnnotation))
+import Control.Exception.Context (displayExceptionContext)
+import Data.Bifunctor (Bifunctor(first))
 import Data.Char (isSpace)
-import Data.List (intercalate)
-import Data.Maybe (fromMaybe)
 
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
@@ -36,37 +38,55 @@ import System.IO
     stdout,
   )
 
-import Data.Text (Text)
-import Data.Text qualified as T
-
 import YCHR
   ( CompiledProgram,
-    Name (..),
-    Term (..),
     compileModules,
-    displayError,
   )
 
 import Language.Lambda.Parser (parseExpr)
-import Language.Lambda.Syntax (GenExpr (..))
 import Language.Lambda.Typecheck
     ( TryTypedExpr(..),
-      TypeAnnotations(Poly, ArgType, Mono),
       TCResult(..),
       Type(..),
-      typecheck )
+      typecheck,
+      TypedExpr
+    )
 import Language.Lambda.Typecheck.Sanity qualified as Sanity
 
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
-import Render
-    ( Render,
-      restartPrec,
-      paren,
-      renderString,
-      renderText,
-      runRender,
-      withPrec,
-      noAssoc ) 
+import PrettyPrint
+import ReplError (wrapConvertError, ReplError, Phase (..), TCError (..), SanityFailure (..))
+
+-- ---------------------------------------------------------------------------
+-- Exceptions
+-- ---------------------------------------------------------------------------
+
+newtype ContextExpr = ContextExpr TryTypedExpr
+  deriving (Show)
+
+instance ExceptionAnnotation ContextExpr where
+  displayExceptionAnnotation (ContextExpr tryExpr) = prefix ++ "annotated expression: " ++ renderTryExpr tryExpr where
+    prefix = case tryExpr of {Failed _ -> "(partially) " ; Typed _ -> ""}
+
+newtype ContextType = ContextType Type
+  deriving (Show)
+
+instance ExceptionAnnotation ContextType where
+  displayExceptionAnnotation (ContextType ty) = renderType False ty
+
+-- Extracted from newer versions of base
+data NoBacktrace e = NoBacktrace e
+  deriving (Show)
+
+instance Exception e => Exception (NoBacktrace e) where
+  fromException = fmap NoBacktrace . fromException
+  toException (NoBacktrace e) = toException e
+  backtraceDesired _ = False
+  
+
+fromRightIO :: Exception e => Either e a -> IO a
+fromRightIO (Left e) = throwIO (NoBacktrace e)
+fromRightIO (Right a) = pure a
 
 -- ---------------------------------------------------------------------------
 -- Driver
@@ -84,20 +104,9 @@ main = do
 -- | Compile the embedded inferencer once; reuse it across every query.
 loadInferencer :: FilePath -> IO (ChrSource CompiledProgram)
 loadInferencer path =
-  newChrSource path $ \source ->
-    case compileModules True [(path, source)] of
-      Left err -> fail ("could not compile " ++ stlcPath ++ ":\n" ++ displayError err)
-      Right (chrSource, _warnings) -> pure chrSource
-
--- | Parse, type-check, and render one line of surface syntax.
-inferLine :: CompiledProgram -> String -> IO String
-inferLine cp line = case parseExpr line of
-  Left err -> pure ("parse error: " ++ err)
-  Right e -> do
-    result <- typecheck cp e
-    pure $ case result of
-      Left err -> show err
-      Right (typedExpr, exprType) -> renderResult typedExpr exprType
+  newChrSource path $ \source ->do
+    (chrSource, _warnings) <- annotateIO PhaseCompileChr $ fromRightIO $ compileModules True [(path, source)]  
+    pure chrSource
 
 -- ---------------------------------------------------------------------------
 -- REPL
@@ -119,8 +128,14 @@ runRepl chrSource = do
         then when interactive (putStrLn "")
         else do
           line <- getLine
-          keepGoing <- step interactive line
+          keepGoing <- step interactive line `catch` handler
           when keepGoing (loop interactive)
+
+    handler (ExceptionWithContext ctxt (err :: ReplError)) = do
+      putStrLn "\nerror:"
+      putStr (displayExceptionContext ctxt)
+      putStrLn (displayException err)
+      pure True
 
     step interactive line
       | command `elem` [":q", ":quit"] = pure False
@@ -128,10 +143,31 @@ runRepl chrSource = do
       | otherwise = do
           when (not interactive) (putStrLn ("stlc> " ++ line))
           cp <- readChrSource chrSource
-          inferLine cp line >>= putStrLn
+          e <- annotateIO PhaseParse $ fromRightIO $ parseExpr line
+          -- TODO maybe we want to separate encode errors and decode errors, using `runCompiledWith Right`,
+          -- (cont.) and handling the decoding in main (or in a function main calls).
+          -- (cont.) This will somewhat break an abstraction, but it is already broken with all the TryTypedExpr and such.
+          tcResult <- annotateIO PhaseTypeCheck $ typecheck cp e
+          (tryTypedExpr, exprTypeOrError) <- annotateIO PhaseDecodeResult $ fromRightIO $ first wrapConvertError $ tcResult
+          exprType <- annotateIO (ContextExpr tryTypedExpr) $ fromRightIO (fromTCResult exprTypeOrError)
+          putStrLn $ "type: " ++ renderType False exprType
+          typedExpr <- annotateIO (ContextType exprType) $ fromRightIO (fromTyped tryTypedExpr)
+          putStrLn $ "annotated expr: " ++ renderExpr typedExpr
+          annotateIO PhaseSanityTypeCheck $ fromRightIO $ first SanityFailure $ Sanity.check typedExpr exprType
+          -- _
+          -- putStrLn $ concatMap (('\n' :) . describeSanityTCError) sanityErrs
+          -- (typedExpr :: TypedExpr, exprType :: Type) <- annotateIO PhaseDecodeResult {-TODO phase-} $ liftA2 (,) <$> fromRightIO (_ tryTypedExpr) <*> fromRightIO (_ exprTypeOrError)
           pure True
       where
         command = strip line
+
+fromTCResult :: TCResult -> Either TCError Type
+fromTCResult (Ok ty) = Right ty
+fromTCResult (Ill errs) = Left $ IllTyped errs
+
+fromTyped :: TryTypedExpr -> Either TCError TypedExpr
+fromTyped (Typed typed) = Right typed
+fromTyped (Failed partlyAnnotated) = Left $ NotFullyAnnotated partlyAnnotated
 
 -- ---------------------------------------------------------------------------
 -- Demo table
@@ -152,127 +188,8 @@ demoInputs =
   ]
 
 -- ---------------------------------------------------------------------------
--- Rendering
--- ---------------------------------------------------------------------------
-
-renderResult :: TryTypedExpr -> TCResult -> String
-renderResult tryTypedExpr tcResult = renderTCResult tcResult ++ "\n" ++ renderTryExpr tryTypedExpr ++ renderSanity tryTypedExpr tcResult
-
-renderSanity :: TryTypedExpr -> TCResult -> String
-renderSanity (Typed typedExpr) (Ok exprType) =
-  let sanityErrs = fromMaybe [] $ Sanity.check typedExpr exprType
-  in concatMap (('\n' :) . describeSanityTCError) sanityErrs
-renderSanity _ _ = ""
-
-renderTCResult :: TCResult -> String
-renderTCResult (Ok t) = renderType False t
-renderTCResult (Ill errs) = "TYPE ERROR: " ++ intercalate "; " (map describeError errs)
-
-renderType :: Bool -> Type -> String
-renderType _ TInt = "int"
--- This is kinda the worst of all worlds
-renderType _ (TVar level n) = tyVarName n ++ "@" ++ show level
-renderType shouldParen (TArrow a b) =
-  parenthesize shouldParen (renderType True a ++ " -> " ++ renderType False b)
-
--- | Render a type that is still a raw 'Term' (as it appears inside an
--- error), tolerating the unbound variables an in-progress inference leaves
--- behind.
-renderTypeTerm :: Term -> String
-renderTypeTerm t = case t of
-  CompoundTerm n [] | localName n == "tint" -> "int"
-  CompoundTerm n [IntTerm k] | localName n == "tvar" -> tyVarName (fromInteger k)
-  CompoundTerm n [a, b]
-    | localName n == "arrow" ->
-        "(" ++ renderTypeTerm a ++ " -> " ++ renderTypeTerm b ++ ")"
-  TextTerm s -> T.unpack s
-  -- A type variable still unbound at the point the error was raised.
-  VarTerm _ -> "_"
-  Wildcard -> "_"
-  _ -> "?"
-
-describeError :: Term -> String
-describeError t = case t of
-  CompoundTerm n [a, b]
-    | localName n == "mismatch" ->
-        "cannot unify " ++ renderTypeTerm a ++ " with " ++ renderTypeTerm b
-  CompoundTerm n [_, ty]
-    | localName n == "infinite_type" ->
-        "cannot construct the infinite type " ++ renderTypeTerm ty
-  CompoundTerm n [x]
-    | localName n == "unbound_variable" ->
-        "unbound variable " ++ renderTypeTerm x
-  -- TODO DELETEME debug code
-  CompoundTerm inst_non_var [ty] | inst_non_var == Unqualified "inst_non_var" -> "tried to instantiate a non-var: " ++ renderTypeTerm ty
-  CompoundTerm my_error [] | my_error == Unqualified "my_error" -> "my_error"
-  CompoundTerm other_error [expr] | other_error == Unqualified "other_error" -> "other_error: " ++ show expr
-  _ -> "?"
-
-renderTryExpr :: TryTypedExpr -> String
-renderTryExpr (Typed typedExpr) = runRender $ renderExpr typedExpr
-renderTryExpr (Failed term) = show term
-
-renderExpr :: GenExpr TypeAnnotations -> Render
-renderExpr (Lam (ArgType ty) v e) = withPrec 1 $ mconcat [
-    "\\",
-    paren $ mconcat [renderText v, ": ", renderString (renderType False ty)],
-    ". ",
-    renderExpr e
-  ]
-renderExpr (App l r) = withPrec 7 $ renderExpr l <> " " <> noAssoc (renderExpr r)
-renderExpr (Var Mono v) = renderText v
-renderExpr (Var (Poly ts) v) = mconcat [
-    renderText v,
-    " @",
-    paren (foldMap (renderString . renderType True) ts)
-  ]
-renderExpr (Let v e1 e2) = withPrec 2 $ mconcat [
-    "let",
-    renderText v,
-    " = ",
-    restartPrec (renderExpr e1),
-    " in ",
-    renderExpr e2
-  ]
-renderExpr (IntLit n) = renderString $ show n
-renderExpr (Add l r) = withPrec 3 $ renderExpr l <> " + " <> renderExpr r
-
-describeSanityTCError :: Sanity.Error -> String
-describeSanityTCError Sanity.TypeMismatch { Sanity.expected , Sanity.actual } = mconcat [
-  "expected: ", renderType False expected, ", found: ", renderType False actual, "."
-  ]
-describeSanityTCError Sanity.ExpectedArrow { Sanity.actual } = mconcat [
-  "expected a function type, found: ", renderType False actual, "."
-  ]
-describeSanityTCError Sanity.NotInScope { Sanity.varName } = mconcat [
-  "not in scope: ", T.unpack varName
-  ]
-describeSanityTCError (Sanity.VarSortMismatch varName mismatchKind) = mconcat [
-  "var sort mismatch in ", T.unpack varName, ". var is: ", expected, ", used as: ", actual, "."
-  ] where
-    (expected, actual) = case mismatchKind of
-      Sanity.VarIsMono -> ("mono", "poly")
-      Sanity.VarIsPoly -> ("poly", "mono")
-describeSanityTCError (Sanity.NotEnoughTypeParams index len) = mconcat [
-  "not enough type parameters. accessed index ", show index, ", while there are only ", show len, " type parameters."
-  ]
-
--- ---------------------------------------------------------------------------
 -- Small helpers
 -- ---------------------------------------------------------------------------
-
-localName :: Name -> Text
-localName (Unqualified n) = n
-localName (Qualified _ n) = n
-
-tyVarName :: Int -> String
-tyVarName n
-  | n < 26 = [toEnum (fromEnum 'a' + n)]
-  | otherwise = 't' : show n
-
-parenthesize :: Bool -> String -> String
-parenthesize True s = "(" ++ s ++ ")"
-parenthesize False s = s
 
 strip :: String -> String
 strip = f . f where f = reverse . dropWhile isSpace

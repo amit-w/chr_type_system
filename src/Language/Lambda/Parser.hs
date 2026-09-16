@@ -14,25 +14,33 @@
 module Language.Lambda.Parser
   ( Expr,
     parseExpr,
+    ParseError,
   )
 where
 
+import Control.Exception (Exception)
 import Data.Functor.Const (Const (..))
 import Data.Text qualified as T
 
-import Text.Parsec
+import Text.Parsec hiding (ParseError)
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
+import Text.Parsec qualified as Parsec
 import Text.Parsec.Token qualified as Tok
 
 import Language.Lambda.Syntax (GenExpr (..))
 
 type Expr = GenExpr (Const ())
 
+newtype ParseError = ParseError Parsec.ParseError
+  deriving newtype (Show)
+
+instance Exception ParseError
+
 -- | Parse a single expression, or return a human-readable error.
-parseExpr :: String -> Either String Expr
+parseExpr :: String -> Either ParseError Expr
 parseExpr input = case parse (Tok.whiteSpace lexer *> expr <* eof) "" input of
-  Left err -> Left (show err)
+  Left err -> Left (ParseError err)
   Right e -> Right e
 
 -- ---------------------------------------------------------------------------

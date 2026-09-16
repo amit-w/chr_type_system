@@ -28,6 +28,7 @@ data VarType
 data Env = Env { vars :: [(Text, VarType)], level :: Int }
 
 data VarSortMismatch = VarIsMono | VarIsPoly
+  deriving (Show)
 
 data Error
   = TypeMismatch { expected :: Type, actual :: Type }
@@ -35,6 +36,7 @@ data Error
   | NotInScope { varName :: Text }
   | VarSortMismatch Text VarSortMismatch
   | NotEnoughTypeParams Int Int
+  deriving (Show)
 
 type M = ReaderT Env (Validation (Endo [Error]))
 
@@ -89,8 +91,8 @@ walk (Add l r) = traverse_ (walk >=> checkEq TInt) [l, r] *> pure TInt
 infer :: TypedExpr -> Either [Error] Type
 infer  = runM . walk
 
-check :: TypedExpr -> Type -> Maybe [Error]
-check expr ty = either Just (const Nothing) $ runM $ walk expr >>= checkEq ty 
+check :: TypedExpr -> Type -> Either [Error] ()
+check expr ty = runM $ walk expr >>= checkEq ty 
 
 checkArrow :: Type -> M (Type, Type)
 checkArrow (TArrow a b) = pure (a, b)
