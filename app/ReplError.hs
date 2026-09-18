@@ -30,8 +30,10 @@ newtype WrappedConvertError = WrappedConvertError { unwrap :: ConvertError }
 data Phase
   = PhaseCompileChr
   | PhaseParse
-  | PhaseTypeCheck
+  | PhaseEncodeGoal
+  | PhaseEmbed
   | PhaseDecodeResult
+  | PhaseTypeCheck
   | PhaseSanityTypeCheck
   deriving (Show)
 
@@ -40,8 +42,10 @@ instance ExceptionAnnotation Phase where
     name = case phase of
       PhaseCompileChr -> "compile chr"
       PhaseParse -> "parse"
-      PhaseTypeCheck -> "type check"
+      PhaseEncodeGoal -> "encode goal"
+      PhaseEmbed -> "embed chr program"
       PhaseDecodeResult -> "decode result"
+      PhaseTypeCheck -> "type check"
       PhaseSanityTypeCheck -> "sanity type check"
 
 wrapConvertError :: ConvertError -> WrappedConvertError

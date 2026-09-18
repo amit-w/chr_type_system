@@ -79,7 +79,6 @@ library
         , Language.Lambda.Syntax
         , Language.Lambda.Typecheck
         , Language.Lambda.Typecheck.Sanity
-        , YCHR.Convert.DecodeM
 
     -- Other library packages from which modules are imported.
     build-depends:    parsec >=3.1 && <3.2

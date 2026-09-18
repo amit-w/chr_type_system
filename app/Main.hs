@@ -23,6 +23,7 @@ import Control.Exception.Annotation (ExceptionAnnotation (displayExceptionAnnota
 import Control.Exception.Context (displayExceptionContext)
 import Data.Bifunctor (Bifunctor(first))
 import Data.Char (isSpace)
+import Data.List (intercalate)
 
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
@@ -38,35 +39,44 @@ import System.IO
     stdout,
   )
 
+import qualified Data.Text as T
+
 import YCHR
   ( CompiledProgram,
     compileModules,
+    Name (..),
+    Term (..),
+    FromTerm (fromTerm),
+    ConvertError,
   )
 
 import Language.Lambda.Parser (parseExpr)
 import Language.Lambda.Typecheck
-    ( TryTypedExpr(..),
-      TCResult(..),
-      Type(..),
+    ( Type(..),
+      RawTypedExpr,
       typecheck,
-      TypedExpr
+      numberExpr,
+      typecheckGoal,
+      decodeTypedExpr,
     )
 import Language.Lambda.Typecheck.Sanity qualified as Sanity
 
 import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
 import PrettyPrint
-import ReplError (wrapConvertError, ReplError, Phase (..), TCError (..), SanityFailure (..))
+import ReplError (wrapConvertError, ReplError, Phase (..), SanityFailure (..), TCError (IllTyped))
 
 -- ---------------------------------------------------------------------------
 -- Exceptions
 -- ---------------------------------------------------------------------------
 
-newtype ContextExpr = ContextExpr TryTypedExpr
+data ContextExpr = ContextExpr RawTypedExpr Term
   deriving (Show)
 
 instance ExceptionAnnotation ContextExpr where
-  displayExceptionAnnotation (ContextExpr tryExpr) = prefix ++ "annotated expression: " ++ renderTryExpr tryExpr where
-    prefix = case tryExpr of {Failed _ -> "(partially) " ; Typed _ -> ""}
+  displayExceptionAnnotation (ContextExpr rawExpr decodedType) = unlines [
+    "partially annotated expression: " ++ show rawExpr,
+    "decoded type: " ++ show decodedType
+    ]
 
 newtype ContextType = ContextType Type
   deriving (Show)
@@ -84,9 +94,15 @@ instance Exception e => Exception (NoBacktrace e) where
   backtraceDesired _ = False
   
 
+throwIONoBacktrace :: Exception e => e -> IO a
+throwIONoBacktrace e = throwIO (NoBacktrace e)
+
 fromRightIO :: Exception e => Either e a -> IO a
 fromRightIO (Left e) = throwIO (NoBacktrace e)
 fromRightIO (Right a) = pure a
+
+runConvertIO :: Either ConvertError a -> IO a
+runConvertIO = fromRightIO . first wrapConvertError
 
 -- ---------------------------------------------------------------------------
 -- Driver
@@ -147,27 +163,23 @@ runRepl chrSource = do
           -- TODO maybe we want to separate encode errors and decode errors, using `runCompiledWith Right`,
           -- (cont.) and handling the decoding in main (or in a function main calls).
           -- (cont.) This will somewhat break an abstraction, but it is already broken with all the TryTypedExpr and such.
-          tcResult <- annotateIO PhaseTypeCheck $ typecheck cp e
-          (tryTypedExpr, exprTypeOrError) <- annotateIO PhaseDecodeResult $ fromRightIO $ first wrapConvertError $ tcResult
-          exprType <- annotateIO (ContextExpr tryTypedExpr) $ fromRightIO (fromTCResult exprTypeOrError)
-          putStrLn $ "type: " ++ renderType False exprType
-          typedExpr <- annotateIO (ContextType exprType) $ fromRightIO (fromTyped tryTypedExpr)
-          putStrLn $ "annotated expr: " ++ renderExpr typedExpr
+          let e' = numberExpr e
+          let goal = typecheckGoal e'
+          putStrLn $ viewTerm goal
+          embededResult <- annotateIO PhaseEmbed $ typecheck cp goal e'
+          (rawTypedExpr, rawExprType, rawErrors) <- annotateIO PhaseEncodeGoal $ runConvertIO $ embededResult
+          (exprType, typedExpr, errors) <- annotateIO PhaseDecodeResult $ do
+            (errors :: [Term]) <- runConvertIO $ fromTerm rawErrors
+            exprType <- annotateIO (ContextExpr rawTypedExpr rawExprType) $ runConvertIO $ fromTerm rawExprType
+            putStrLn $ "type: " ++ renderType False exprType
+            typedExpr <- annotateIO (ContextType exprType) $ runConvertIO $ (decodeTypedExpr rawTypedExpr)
+            putStrLn $ "annotated expr: " ++ renderExpr typedExpr
+            pure (exprType, typedExpr, errors)
+          when (not (null errors)) $ annotateIO PhaseTypeCheck $ throwIONoBacktrace (IllTyped errors)
           annotateIO PhaseSanityTypeCheck $ fromRightIO $ first SanityFailure $ Sanity.check typedExpr exprType
-          -- _
-          -- putStrLn $ concatMap (('\n' :) . describeSanityTCError) sanityErrs
-          -- (typedExpr :: TypedExpr, exprType :: Type) <- annotateIO PhaseDecodeResult {-TODO phase-} $ liftA2 (,) <$> fromRightIO (_ tryTypedExpr) <*> fromRightIO (_ exprTypeOrError)
           pure True
       where
         command = strip line
-
-fromTCResult :: TCResult -> Either TCError Type
-fromTCResult (Ok ty) = Right ty
-fromTCResult (Ill errs) = Left $ IllTyped errs
-
-fromTyped :: TryTypedExpr -> Either TCError TypedExpr
-fromTyped (Typed typed) = Right typed
-fromTyped (Failed partlyAnnotated) = Left $ NotFullyAnnotated partlyAnnotated
 
 -- ---------------------------------------------------------------------------
 -- Demo table
@@ -193,3 +205,17 @@ demoInputs =
 
 strip :: String -> String
 strip = f . f where f = reverse . dropWhile isSpace
+
+viewName :: Name -> String
+viewName (Qualified modName name) = T.unpack modName ++ ":" ++ T.unpack name
+viewName (Unqualified name) = T.unpack name
+
+viewTerm :: Term -> String
+viewTerm (VarTerm name) = T.unpack name
+viewTerm (IntTerm n) = show n
+viewTerm (FloatTerm n) = show n
+viewTerm (TextTerm s) = show s
+viewTerm (CompoundTerm name []) = viewName name
+viewTerm (CompoundTerm name xs) = viewName name ++ "(" ++ intercalate ", " (map viewTerm xs) ++ ")"
+viewTerm Wildcard = "_"
+                                                                                            

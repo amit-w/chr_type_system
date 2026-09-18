@@ -29,7 +29,7 @@
 %                    such as `arrow(tvar(0), tvar(0))` can be printed and
 %                    decoded with its sharing intact.
 
-:- module(stlc, [typecheck/2, type(expr/0)]).
+:- module(stlc, [typecheck/3, type(expr/0)]).
 :- use_module(library(prelude)).
 :- use_module(library(lists)).
 
@@ -71,7 +71,7 @@
 % Entry point. `Result` is unified with `ok(Type)` when inference
 % succeeds, or `type_error(Errors)` when it does not.
 :- chr_constraint
-    typecheck(expr, tc_result),
+    typecheck(expr, ty, list(any)),
     typeof(generalization_domain, list(binding), expr, ty),
     % TODO rename level & level_all
     level(ty, generalization_domain),
@@ -88,7 +88,7 @@
     bind_ty(ty, ty),
     future_assign_tvars(list(ty), int),
     assign_tvars(list(ty), int, int),
-    finish(any, ty, tc_result),
+    finish,
     report_error(any),
     phase_dispose_GDs,
     phase_dispose_IDs,
@@ -111,20 +111,18 @@
 % `collect` fires every error `typeof` could raise has already landed in
 % `errors`.
 
-typecheck(Expr, Result) <=>
+typecheck(Expr, T, Es) <=>
     errors([]),
     generalization_domain(TopGD, 0),
     level(T, TopGD),
     typeof(TopGD, [], Expr, T),
     collect(Es),
-    finish(Es, T, Result).
+    finish.
 
 % TODO if we return partially annotated terms, it makes sense to also return partially annotated types.
 % (cont.) typecheck's signature should probably be typecheck(Expr, Type, Errors) and the haskell side will handle it
 % No errors: ground the residual type variables and report the type.
-finish_ok @  finish([], T, Result) <=> phase_dispose_GDs, phase_dispose_IDs, phase_number_vars, Result = ok(T).
-% At least one error: report them, leaving the (partial) type untouched.
-finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
+finish <=> phase_dispose_GDs, phase_dispose_IDs, phase_number_vars.
 
 % ==========================================================================
 % Levels: level(Var, Level), level_all(Vars, Level)

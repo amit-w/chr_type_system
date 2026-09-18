@@ -2,17 +2,20 @@
 
 module Language.Lambda.Typecheck (
   Type(..),
-  TCResult(..),
-  TypedExpr,
-  TryTypedExpr (..),
-  typecheck,
   TypeAnnotations(..),
+  TypedExpr,
+  RawTypedExpr,
+  typecheck,
+  numberExpr,
+  typecheckGoal,
+  decodeTypedExpr,
   ) where
 
 import Control.Monad.State (evalState, State, modify, MonadState (get))
-import Control.Monad.Reader (ReaderT(runReaderT))
+import Data.Coerce (coerce)
 import Data.Functor.Const (Const (..))
 
+import Data.Map (Map, findWithDefault)
 import Data.Text (Text, pack)
 import Data.Singletons (SingI (..))
 
@@ -29,9 +32,8 @@ import YCHR
     ConvertError,
   )
 
+import Data.HFunctor (HFunctor(hmap))
 import Data.HTraversable (HTraversable (htraverse))
-
-import YCHR.Convert.DecodeM ( DecodeM, decodeVarM, decodeSumM, argAtM, orElse )
 
 import Language.Lambda.Parser (Expr)
 import Language.Lambda.Syntax (GenExpr (..), Loc (..), SLoc (..))
@@ -47,6 +49,8 @@ instance ToTerm ChrVar where
   toTerm v = VarTerm v.varName
 
 type NumberedExpr = GenExpr (Const ChrVar)
+
+type RawTypedExpr = GenExpr (Const Term)
 
 numberExpr :: Expr -> NumberedExpr
 numberExpr e = evalState (htraverse (const freshVariable) e) 0 where
@@ -110,30 +114,29 @@ data TryTypedExpr
 -- typechecking
 -- ---------------------------------------------------------------------------
 
--- This is the only function exported from this module
-typecheck :: CompiledProgram -> Expr -> IO (Either ConvertError (TryTypedExpr, TCResult))
-typecheck cp e =
-  let e' = numberExpr e
-  in runQueryCompiledWith cp (typecheckGoal e') (decodeResult e').runReaderT
+typecheck :: CompiledProgram -> Term -> NumberedExpr -> IO (Either ConvertError (GenExpr (Const Term), Term, Term))
+typecheck cp goal expr = runQueryCompiledWith cp goal (Right . decodeResult expr)
 
-decodeChrVar :: FromTerm a => Const ChrVar x -> DecodeM a
-decodeChrVar chrVar = decodeVarM chrVar.getConst.varName
-
-decodeResult :: NumberedExpr -> DecodeM (TryTypedExpr, TCResult)
-decodeResult e = liftA2 (,) (typedExpr `orElse` failedTypedExpr) (decodeVarM "Result")
+-- TODO (rename): `decode` is used in this module for two quite different things.
+decodeResult :: NumberedExpr -> Map Text Term -> (GenExpr (Const Term), Term, Term)
+decodeResult e varMap = (typedExpr, exprType, errors)
   where
-    typedExpr = Typed <$> htraverse decodeAnnotation e
-    failedTypedExpr = Failed <$> htraverse (\var -> Const <$> decodeChrVar var) e
+    typedExpr = hmap (coerce getVar) e
+    exprType = getVar "Type"
+    errors = getVar "Errors"
+    getVar varName = findWithDefault (VarTerm varName) varName varMap
 
-decodeAnnotation :: forall x. (SingI x) => Const ChrVar x -> DecodeM (TypeAnnotations x)
-decodeAnnotation chrVar = case sing @x of
+decodeTypedExpr :: RawTypedExpr -> Either ConvertError TypedExpr
+decodeTypedExpr = htraverse (coerce decodeAnnotation)
+
+decodeAnnotation :: forall x. (SingI x) => Term -> Either ConvertError (TypeAnnotations x)
+decodeAnnotation term = case sing @x of
   SLocVar -> do
-    term <- decodeChrVar chrVar
-    decodeSumM
+    decodeSum
       [ ("mono_var", 0, const (pure Mono)),
-        ("poly_var", 1, \as -> fmap Poly (argAtM 0 as))
+        ("poly_var", 1, \as -> fmap Poly (argAt 0 as))
       ] term
-  SLocLam -> ArgType <$> decodeChrVar chrVar
+  SLocLam -> ArgType <$> fromTerm term
 
 -- | Build the goal @typecheck(<expr>, Result)@. The encoded expression
 -- needs no quoting: @expr@ is a declared, exported type, so the goal's
@@ -141,4 +144,5 @@ decodeAnnotation chrVar = case sing @x of
 -- @stlc:evar@, @stlc:lam@, ... — the same form the rule heads match,
 -- and data rather than function calls.
 typecheckGoal :: NumberedExpr -> Term
-typecheckGoal e = compound "typecheck" [toTerm e, VarTerm "Result"]
+-- TODO get back errors
+typecheckGoal e = compound "typecheck" [toTerm e, VarTerm "Type", VarTerm "Errors"]

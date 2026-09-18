@@ -1,16 +1,11 @@
 module PrettyPrint
-  ( renderResult
-  , renderTCResult
-  , renderType
+  ( renderType
   , renderTypeTerm
   , describeSanityTCError
   , describeError
-  , renderTryExpr
   , renderExpr
   )
 where
-
-import Data.List (intercalate)
 
 import Data.Text qualified as T
 import Data.Text (Text)
@@ -20,9 +15,7 @@ import YCHR
       Name(..) ) 
 
 import Language.Lambda.Typecheck
-    ( TryTypedExpr(..),
-      TCResult(..),
-      Type(..),
+    ( Type(..),
       TypeAnnotations(Poly, ArgType, Mono) ) 
 import Language.Lambda.Syntax ( GenExpr(..) ) 
 import Language.Lambda.Typecheck.Sanity qualified as Sanity
@@ -36,13 +29,6 @@ import Render
       withPrec,
       noAssoc ) 
 
-
-renderResult :: TryTypedExpr -> TCResult -> String
-renderResult tryTypedExpr tcResult = renderTCResult tcResult ++ "\n" ++ renderTryExpr tryTypedExpr
-
-renderTCResult :: TCResult -> String
-renderTCResult (Ok t) = renderType False t
-renderTCResult (Ill errs) = "TYPE ERROR: " ++ intercalate "; " (map describeError errs)
 
 renderType :: Bool -> Type -> String
 renderType _ TInt = "int"
@@ -103,10 +89,6 @@ describeError t = case t of
   CompoundTerm my_error [] | my_error == Unqualified "my_error" -> "my_error"
   CompoundTerm other_error [expr] | other_error == Unqualified "other_error" -> "other_error: " ++ show expr
   _ -> "?"
-
-renderTryExpr :: TryTypedExpr -> String
-renderTryExpr (Typed typedExpr) = renderExpr typedExpr
-renderTryExpr (Failed term) = show term
 
 renderExpr :: GenExpr TypeAnnotations -> String
 renderExpr expr = runRender (go expr) where
