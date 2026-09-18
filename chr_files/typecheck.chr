@@ -301,6 +301,8 @@ number_gd @ phase_dispose_GDs \ generalization_domain(GD, Level) <=>
 
 dispose_GD_var @ dispose_GD(GD, Vars, Level), level(Var, GD) <=> dispose_GD(GD, [Var | Vars], Level).
 dispose_GD_end @ dispose_GD(GD, Vars, Level) <=>
+    % TODO the following two should be merged to gd_args(GD, Level, Vars) (maybe also incl. length?)
+    gd_args(GD, Vars),
     future_assign_tvars(Vars, Level),
     gd_arg_count(GD, length(Vars)).
 
