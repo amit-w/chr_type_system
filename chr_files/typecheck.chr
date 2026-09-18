@@ -31,6 +31,7 @@
 
 :- module(stlc, [typecheck/2, type(expr/0)]).
 :- use_module(library(prelude)).
+:- use_module(library(lists)).
 
 % The object language is *host-supplied data*: the Haskell driver builds
 % these compounds and passes them in. It is a declared type, and it is
@@ -85,12 +86,18 @@
     instantiate_ty(instantiation_domain, ty, ty),
     instantiation_domain(instantiation_domain, var_annotation, generalization_domain),
     bind_ty(ty, ty),
+    future_assign_tvars(list(ty), int),
     assign_tvars(list(ty), int, int),
     finish(any, ty, tc_result),
     report_error(any),
-    % TODO rename start_* to phase_*
-    start_numbering,
-    start_let_type_args,
+    phase_dispose_GDs,
+    phase_dispose_IDs,
+    phase_number_vars,
+
+    dispose_GD/3,
+    gd_arg_count/2,
+    dispose_ID/4,
+    % start_let_type_args,
     errors(any),
     collect(any).
 
@@ -112,8 +119,10 @@ typecheck(Expr, Result) <=>
     collect(Es),
     finish(Es, T, Result).
 
+% TODO if we return partially annotated terms, it makes sense to also return partially annotated types.
+% (cont.) typecheck should probably be typecheck(Expr, Type, Errors)
 % No errors: ground the residual type variables and report the type.
-finish_ok @  finish([], T, Result) <=> start_numbering, start_let_type_args, Result = ok(T).
+finish_ok @  finish([], T, Result) <=> phase_dispose_GDs, phase_dispose_IDs, phase_number_vars, Result = ok(T).
 % At least one error: report them, leaving the (partial) type untouched.
 finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
 
@@ -127,6 +136,8 @@ finish_err @ finish([E | Es], _, Result) <=> Result = type_error([E | Es]).
 % `level_all` is used to assigned a level to multiple variables.
 
 level_only_variable @ level(V, _) <=> nonvar(V) | true.
+level_singleton     @ level(V, GD) \ level(V, GD) <=> true.
+% TODO create a gd_descendant constraint instead
 level_smallest      @ level(V, GDLow), generalization_domain(GDLow, Low), generalization_domain(GDHigh, High) \ level(V, GDHigh) <=> High >= Low | true.
 
 level_all_peel @ level_all([V | Vs], Level) <=> level(V, Level), level_all(Vs, Level).
@@ -283,33 +294,48 @@ occurs(V, arrow(A, B)) | occurs(V, A) -> true.
 occurs(V, arrow(A, B)) -> occurs(V, B).
 occurs(_, _) -> false.
 
-number_gd @ start_numbering \ generalization_domain(GD, Level) <=>
-    gd_args(GD, Args),
-    number_domain(GD, Level, 0, Args).
+number_gd @ phase_dispose_GDs \ generalization_domain(GD, Level) <=>
+    % gd_args(GD, Args),
+    % number_domain(GD, Level, 0, Args).
+    dispose_GD(GD, [], Level).
 
-number_tvar @ number_domain(GD, Level, Number, Args), level(Var, GD) <=>
-    Var = tvar(Level, Number),
-    % TODO I think doing it like this causes a lot of re-activations.
-    % \ We can instead pass an empty list in `number_gd`, with each `number_tvar` prepending to it, and `number_end` adding a `gd_args`
-    % (Also, it won't be number_*, but rather collect_*, see TODO comment [collect]) (may change name, since there is a `collect` rule)
-    Args = [Var | Rest],
-    NextNumber is Number + 1,
-    number_domain(GD, Level, NextNumber, Rest).
+dispose_GD_var @ dispose_GD(GD, Vars, Level), level(Var, GD) <=> dispose_GD(GD, [Var | Vars], Level).
+dispose_GD_end @ dispose_GD(GD, Vars, Level) <=>
+    future_assign_tvars(Vars, Level),
+    gd_arg_count(GD, length(Vars)).
 
-number_end  @ number_domain(GD, _, _, Args) <=>
-    % TODO maybe also record length of Args?
-    Args = [].
+% number_tvar @ number_domain(GD, Level, Number, Args), level(Var, GD) <=>
+%     Var = tvar(Level, Number),
+%     % TODO I think doing it like this causes a lot of re-activations.
+%     % \ We can instead pass an empty list in `number_gd`, with each `number_tvar` prepending to it, and `number_end` adding a `gd_args`
+%     % (Also, it won't be number_*, but rather collect_*, see TODO comment [collect]) (may change name, since there is a `collect` rule)
+%     Args = [Var | Rest],
+%     NextNumber is Number + 1,
+%     number_domain(GD, Level, NextNumber, Rest).
+% number_end  @ number_domain(GD, _, _, Args) <=>
+%     % TODO maybe also record length of Args?
+%     Args = [].
 
-% TODO change to another prefix instead of typaram
-typaram_let @ start_let_type_args, gd_args(GD, Args) \ instantiation_domain(D, VA, GD) <=>
-    VA = poly_var(A),
-    let_type_args(D, A, Args).
+phase_dispose_IDs, gd_args(GD, GDArgs) \ instantiation_domain(ID, VA, GD) <=>
+    dispose_ID(ID, VA, [], GDArgs).
 
-typaram_var @ let_type_args(D, A, [Arg | Args]) \ instantiate_ty(D, Var, Arg) <=>
-    A = [Var | B],
-    let_type_args(D, B, Args).
+dispose_ID_var @ dispose_ID(ID, VA, IVars, [GVar | GVars]), instantiate_ty(ID, IVar, GVar) <=>
+    dispose_ID(ID, VA, [IVar | IVars], GVars).
+dispose_ID_end @ dispose_ID(ID, VA, IVars, []) <=>
+    Reversed is lists:reverse(distinct(IVars)),
+    VA = poly_var(Reversed).
 
-typaram_end @ let_type_args(D, A, []) <=> A = [].
+phase_number_vars \ future_assign_tvars(Args, Level) <=>
+    assign_tvars(Args, Level, 0).
+
+% % TODO change to another prefix instead of typaram
+% typaram_let @ start_let_type_args, gd_args(GD, Args) \ instantiation_domain(D, VA, GD) <=>
+%     VA = poly_var(A),
+%     let_type_args(D, A, Args).
+% typaram_var @ let_type_args(D, A, [Arg | Args]) \ instantiate_ty(D, Var, Arg) <=>
+%     A = [Var | B],
+%     let_type_args(D, B, Args).
+% typaram_end @ let_type_args(D, A, []) <=> A = [].
 
 assign_nil  @ assign_tvars([], _, _) <=> true.
 assign_cons @ assign_tvars([V | Vs], Level, N) <=>
