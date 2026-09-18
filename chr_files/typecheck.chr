@@ -120,7 +120,7 @@ typecheck(Expr, Result) <=>
     finish(Es, T, Result).
 
 % TODO if we return partially annotated terms, it makes sense to also return partially annotated types.
-% (cont.) typecheck should probably be typecheck(Expr, Type, Errors)
+% (cont.) typecheck's signature should probably be typecheck(Expr, Type, Errors) and the haskell side will handle it
 % No errors: ground the residual type variables and report the type.
 finish_ok @  finish([], T, Result) <=> phase_dispose_GDs, phase_dispose_IDs, phase_number_vars, Result = ok(T).
 % At least one error: report them, leaving the (partial) type untouched.
@@ -255,7 +255,7 @@ inst_arrow      @ instantiation_domain(D, _, _), level(T, T_GD) \ instantiate_ty
     unify_ty(T, arrow(TA, TB)).
 % TODO [collect] re-introduce inst_error, after making sure that Ty=tvar(_, _) is impossible
 % (TODO) idea is: collect_gd (collects gd_args) -> start_let_type_args -> number_gd_args (which will use assign_tvars)
-% inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
+inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
 inst_direct     @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), level(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
     instantiate_ty(D, T, V) <=>
     DomainLevel > VarLevel |
