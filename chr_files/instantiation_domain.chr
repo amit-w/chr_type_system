@@ -64,6 +64,6 @@ phase_dispose_IDs, gd_args(GD, _, GDArgs) \ instantiation_domain(ID, VA, GD) <=>
 dispose_ID_var @ dispose_ID(ID, VA, IVars, [GVar | GVars]), instantiate_ty(ID, IVar, GVar) <=>
     dispose_ID(ID, VA, [IVar | IVars], GVars).
 dispose_ID_end @ dispose_ID(ID, VA, IVars, []) <=>
-    Reversed is lists:reverse(distinct(IVars)),
+    Reversed is lists:reverse(IVars),
     VA = poly_var(Reversed).
 
