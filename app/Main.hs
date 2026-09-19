@@ -27,6 +27,7 @@ import Data.List (intercalate)
 
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
+import System.FilePath ((</>))
 import System.IO
   ( BufferMode (NoBuffering),
     hFlush,
@@ -110,16 +111,24 @@ main :: IO ()
 main = do
   progName <- getProgName
   args <- getArgs
-  chrSource <- newChrSource [stlcPath {-TODO other paths-}]
+  chrSource <- newChrSource chrFiles
   case args of
     [] -> runRepl chrSource
     _ -> hPutStrLn stderr ("usage: " ++ progName) >> exitFailure
 
--- | Path of the inferencer source, relative to the package root (GHC runs
--- splices with the cabal package directory as cwd). Also surfaced in
--- compile diagnostics.
-stlcPath :: FilePath
-stlcPath = "chr_files/typecheck.chr"
+chrFiles :: [FilePath]
+chrFiles = map ("chr_files" </>)
+  -- types.chr & errors.chr go first, since they have no dependencies,
+  -- and no constraints that appear in rule-heads in other modules.
+  [ "types.chr"
+  , "errors.chr"
+  -- generalization_domain.chr goes before other .chr files, to avoid them seeing non-signleton `associate_var`s.
+  , "generalization_domain.chr"
+  -- The order of the rest of the modules doesn't matter currently.
+  , "instantiation_domain.chr"
+  , "walk.chr"
+  , "typecheck.chr"
+  ]
 
 -- ---------------------------------------------------------------------------
 -- REPL

@@ -1,0 +1,129 @@
+% DOC doc module
+:- module(walk).  % TASK explicit export list.
+
+:- use_module(types).
+:- use_module(errors).
+:- use_module(gd).
+:- use_module(id).
+
+
+:- chr_type bind_mode ---> mono ; poly(generalization_domain).
+
+% A typing-context cell. `Env` is a list of these.
+:- chr_type binding ---> bind(string, bind_mode, ty).
+
+% ==========================================================================
+% Typing rules: typeof(GD, Env, Expr, T)
+% ==========================================================================
+%
+% Env is an association list of `bind(Name, Type)` cells. Each rule is a
+% simplification: the `typeof` goal is consumed and replaced by the
+% subgoals that decompose it. Variables first mentioned in a body (A, B,
+% TF, TA below) are fresh type variables.
+
+:- chr_constraint
+    typeof(generalization_domain, list(binding), expr, ty),
+    lookup_ty(list(binding), string, ty, var_annotation),
+    unify_ty(ty, ty),
+    bind_ty(ty, ty).
+
+
+typeof_int @ typeof(_, _, lit_int(_), T) <=> unify_ty(T, tint).
+
+typeof_add @ typeof(GD, Env, add(A, B), T) <=>
+    associate_var(TA, GD),
+    typeof(GD, Env, A, TA),
+    associate_var(TB, GD),
+    typeof(GD, Env, B, TB),
+    unify_ty(TA, tint),
+    unify_ty(TB, tint),
+    unify_ty(T, tint).
+
+typeof_var @ typeof(_, Env, evar(X, VA), T) <=> lookup_ty(Env, X, T, VA).
+
+% `Env2 = [...]` introduces the fresh argument-type variable A: a bare
+% unbound variable may not first appear nested inside a constraint tell
+% (whose arguments are evaluated), but `=` is pure unification and binds
+% the new variables in its operands.
+typeof_lam @ typeof(GD, Env, lam(X, A, Body), T) <=>
+    Env2 = [bind(X, mono, A) | Env],
+    associate_var(B, GD),
+    typeof(GD, Env2, Body, B),
+    unify_ty(T, arrow(A, B)).
+
+typeof_app @ typeof(GD, Env, app(F, Arg), T) <=>
+    associate_var(TF, GD),
+    typeof(GD, Env, F, TF),
+    associate_var(TA, GD),
+    typeof(GD, Env, Arg, TA),
+    unify_ty(TF, arrow(TA, T)).
+
+typeof_let @ generalization_domain(GD, Level) \ typeof(GD, Env, let(X, Val, Body), T) <=>
+    % TODO avoid having to deal with Level in this rule by having a `nested_gd` rule.
+    NestedLevel is Level + 1,
+    generalization_domain(NestedGD, NestedLevel),
+    associate_var(A, NestedGD),
+    typeof(NestedGD, Env, Val, A),
+    Env2 = [bind(X, poly(NestedGD), A) | Env],
+    typeof(GD, Env2, Body, T).
+
+% ==========================================================================
+% Context lookup: lookup_ty(Env, Name, T, VA)
+% ==========================================================================
+%
+% The three rules are tried top-to-bottom. In the first head the repeated
+% `X` becomes an implicit equality guard, so it fires only when the head
+% binding's name matches; otherwise the general second rule skips a cell.
+% Reaching the empty list means the variable was never bound.
+
+lookup_mono @ lookup_ty([bind(X, mono, Ty) | _], X, T, VA) <=> unify_ty(T, Ty), VA = mono_var.
+lookup_poly @ lookup_ty([bind(X, poly(GD), Ty) | _], X, T, VA) <=>
+    % TODO make a constraint in id.chr that encapsulate these
+    instantiation_domain(D, VA, GD),
+    instantiate_ty(D, T, Ty).
+lookup_skip @ lookup_ty([bind(_, _, _) | Rest], X, T, VA) <=> lookup_ty(Rest, X, T, VA).
+lookup_miss @ lookup_ty([], X, _, VA) <=> report_error(quote(unbound_variable(X))).
+
+% ==========================================================================
+% Type unification: unify_ty(T1, T2)
+% ==========================================================================
+%
+% A structural unifier that binds unbound type variables but *never* lets a
+% raw `=` fail: an incompatible pair of concrete types is reported as an
+% error instead of aborting the whole run. Variable cases bind directly
+% (one side is always an unbound variable, so `=` cannot fail there).
+
+unify_int   @ unify_ty(tint, tint) <=> true.
+unify_arrow @ unify_ty(arrow(A1, R1), arrow(A2, R2)) <=>
+    unify_ty(A1, A2),
+    unify_ty(R1, R2).
+
+unify_vv @ unify_ty(T1, T2) <=> var(T1), var(T2) | T1 = T2.
+unify_vt @ unify_ty(T1, T2) <=> var(T1), nonvar(T2) | bind_ty(T1, T2).
+unify_tv @ unify_ty(T1, T2) <=> nonvar(T1), var(T2) | bind_ty(T2, T1).
+unify_bad @ unify_ty(T1, T2) <=> nonvar(T1), nonvar(T2) |
+    report_error(quote(mismatch(T1, T2))).
+
+% Bind a variable to a type, guarding against the infinite types that
+% self-application (`lam(x, app(evar(x), evar(x)))`) would otherwise create.
+bind_occurs @ bind_ty(V, Ty) <=> occurs(V, Ty) |
+    report_error(quote(infinite_type(V, Ty))).
+bind_ok     @ associate_var(V, GD) \ bind_ty(V, Ty) <=>
+    associate_vars(term_variables(Ty), GD),
+    V = Ty.
+
+% ==========================================================================
+% Helpers
+% ==========================================================================
+
+% occurs(V, Ty): does the unbound variable V appear anywhere in Ty? Only
+% DOC update doc
+% ever called on pre-`number_vars` types, whose leaves are `tint` or
+% unbound variables, so the `arrow` recursion covers every compound case.
+:- function occurs/2.
+occurs(V, T) | V == T -> true.
+occurs(_, T) | var(T) -> false.
+occurs(V, arrow(A, B)) | occurs(V, A) -> true.
+occurs(V, arrow(A, B)) -> occurs(V, B).
+occurs(_, _) -> false.
+

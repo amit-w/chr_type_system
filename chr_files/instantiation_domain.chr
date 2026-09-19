@@ -1,0 +1,59 @@
+% DOC doc module
+% RENAME to inst/instantiate
+:- module(id).  % TASK explicit export list.
+
+:- use_module(library(prelude)).
+:- use_module(library(lists)).
+
+:- use_module(types).
+:- use_module(errors).
+:- use_module(walk).
+:- use_module(gd).
+
+
+:- opaque_type instantiation_domain.
+
+:- chr_constraint
+    instantiate_ty(instantiation_domain, ty, ty),
+    instantiation_domain(instantiation_domain, var_annotation, generalization_domain),
+    phase_dispose_IDs,
+    dispose_ID(instantiation_domain, var_annotation, list(ty), list(ty)).
+
+
+% ==========================================================================
+% Instantiation: instantiate_ty(D, T1, T2)
+% ==========================================================================
+%
+% Instantiate T2 to T1 in instantiation-domain D.
+% The instantiation-domain is used to make sure that an instantiated variable always instantiate to the same type.
+% instantiation_domain(D, Level) sets the associate_var of the domain.   % DOC update this line
+inst_tint       @ instantiate_ty(D, T, tint) <=> unify_ty(T, tint).
+inst_arrow      @ instantiation_domain(D, _, _), associate_var(T, T_GD) \ instantiate_ty(D, T, arrow(A, B)) <=>
+    associate_var(TA, T_GD),
+    instantiate_ty(D, TA, A),
+    associate_var(TB, T_GD),
+    instantiate_ty(D, TB, B),
+    unify_ty(T, arrow(TA, TB)).
+inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
+inst_direct     @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), associate_var(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
+    instantiate_ty(D, T, V) <=>
+    DomainLevel > VarLevel |
+    V = T.
+% TODO reorder so the error case will be last
+inst_level_high @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), associate_var(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
+    instantiate_ty(D, T, V) <=>
+    DomainLevel < VarLevel |
+    report_error(quote(inst_level_high)).
+inst_singleton  @ instantiate_ty(D, T1, V) \ instantiate_ty(D, T2, V) <=>
+    unify_ty(T1, T2).
+
+
+phase_dispose_IDs, gd_args(GD, GDArgs) \ instantiation_domain(ID, VA, GD) <=>
+    dispose_ID(ID, VA, [], GDArgs).
+
+dispose_ID_var @ dispose_ID(ID, VA, IVars, [GVar | GVars]), instantiate_ty(ID, IVar, GVar) <=>
+    dispose_ID(ID, VA, [IVar | IVars], GVars).
+dispose_ID_end @ dispose_ID(ID, VA, IVars, []) <=>
+    Reversed is lists:reverse(distinct(IVars)),
+    VA = poly_var(Reversed).
+
