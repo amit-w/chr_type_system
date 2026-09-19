@@ -42,9 +42,7 @@ import System.IO
 import qualified Data.Text as T
 
 import YCHR
-  ( CompiledProgram,
-    compileModules,
-    Name (..),
+  ( Name (..),
     Term (..),
     FromTerm (fromTerm),
     ConvertError,
@@ -61,7 +59,7 @@ import Language.Lambda.Typecheck
     )
 import Language.Lambda.Typecheck.Sanity qualified as Sanity
 
-import Embed (ChrSource, newChrSource, readChrSource, stlcPath)
+import ChrSource (ChrSource, newChrSource, readChrSource)
 import PrettyPrint
 import ReplError (wrapConvertError, ReplError, Phase (..), SanityFailure (..), TCError (IllTyped))
 
@@ -112,23 +110,22 @@ main :: IO ()
 main = do
   progName <- getProgName
   args <- getArgs
-  chrSource <- loadInferencer stlcPath
+  chrSource <- newChrSource [stlcPath {-TODO other paths-}]
   case args of
     [] -> runRepl chrSource
     _ -> hPutStrLn stderr ("usage: " ++ progName) >> exitFailure
 
--- | Compile the embedded inferencer once; reuse it across every query.
-loadInferencer :: FilePath -> IO (ChrSource CompiledProgram)
-loadInferencer path =
-  newChrSource path $ \source ->do
-    (chrSource, _warnings) <- annotateIO PhaseCompileChr $ fromRightIO $ compileModules True [(path, source)]  
-    pure chrSource
+-- | Path of the inferencer source, relative to the package root (GHC runs
+-- splices with the cabal package directory as cwd). Also surfaced in
+-- compile diagnostics.
+stlcPath :: FilePath
+stlcPath = "chr_files/typecheck.chr"
 
 -- ---------------------------------------------------------------------------
 -- REPL
 -- ---------------------------------------------------------------------------
 
-runRepl :: ChrSource CompiledProgram -> IO ()
+runRepl :: ChrSource -> IO ()
 runRepl chrSource = do
   hSetBuffering stdout NoBuffering
   interactive <- hIsTerminalDevice stdin
@@ -158,7 +155,7 @@ runRepl chrSource = do
       | null command = pure True
       | otherwise = do
           when (not interactive) (putStrLn ("stlc> " ++ line))
-          cp <- readChrSource chrSource
+          cp <- annotateIO PhaseCompileChr $ fromRightIO =<< readChrSource chrSource
           e <- annotateIO PhaseParse $ fromRightIO $ parseExpr line
           -- TODO maybe we want to separate encode errors and decode errors, using `runCompiledWith Right`,
           -- (cont.) and handling the decoding in main (or in a function main calls).
@@ -218,4 +215,3 @@ viewTerm (TextTerm s) = show s
 viewTerm (CompoundTerm name []) = viewName name
 viewTerm (CompoundTerm name xs) = viewName name ++ "(" ++ intercalate ", " (map viewTerm xs) ++ ")"
 viewTerm Wildcard = "_"
-                                                                                            

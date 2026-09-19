@@ -98,7 +98,7 @@ executable chr-type-system
 
     -- Modules included in this executable, other than Main.
     other-modules:
-        , Embed
+        , ChrSource
         , PrettyPrint
         , Render
         , ReplError
