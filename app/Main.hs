@@ -111,9 +111,8 @@ main :: IO ()
 main = do
   progName <- getProgName
   args <- getArgs
-  chrSource <- newChrSource chrFiles
   case args of
-    [] -> runRepl chrSource
+    [] -> runRepl =<< newChrSource chrFiles
     _ -> hPutStrLn stderr ("usage: " ++ progName) >> exitFailure
 
 chrFiles :: [FilePath]
@@ -150,14 +149,9 @@ runRepl chrSource = do
         then when interactive (putStrLn "")
         else do
           line <- getLine
-          keepGoing <- step interactive line `catch` handler
+          keepGoing <- step interactive line `catch` (\err -> True <$ handler err)
           when keepGoing (loop interactive)
 
-    handler (ExceptionWithContext ctxt (err :: ReplError)) = do
-      putStrLn "\nerror:"
-      putStr (displayExceptionContext ctxt)
-      putStrLn (displayException err)
-      pure True
 
     step interactive line
       | command `elem` [":q", ":quit"] = pure False
@@ -186,6 +180,12 @@ runRepl chrSource = do
           pure True
       where
         command = strip line
+
+handler :: ExceptionWithContext ReplError -> IO ()
+handler (ExceptionWithContext ctxt err) = do
+  putStrLn "\nerror:"
+  putStr (displayExceptionContext ctxt)
+  putStrLn (displayException err)
 
 -- ---------------------------------------------------------------------------
 -- Demo table
