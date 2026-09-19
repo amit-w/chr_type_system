@@ -117,9 +117,9 @@ main = do
 
 chrFiles :: [FilePath]
 chrFiles = map ("chr_files" </>)
-  -- types.chr & errors.chr go first, since they have no dependencies,
+  -- common.chr & errors.chr go first, since they have no dependencies,
   -- and no constraints that appear in rule-heads in other modules.
-  [ "types.chr"
+  [ "common.chr"
   , "errors.chr"
   -- generalization_domain.chr goes before other .chr files, to avoid them seeing non-signleton `associate_var`s.
   , "generalization_domain.chr"

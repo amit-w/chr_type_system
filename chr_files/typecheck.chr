@@ -30,17 +30,16 @@
 %                    such as `arrow(tvar(0), tvar(0))` can be printed and
 %                    decoded with its sharing intact.
 
-% RENAME this module (in particular I'm not sure this counts as stlc anymore)
-:- module(stlc, [typecheck/3]).
+:- module(typecheck, [typecheck/3]).
 
 :- use_module(library(prelude)).
 :- use_module(library(lists)).
 
-:- use_module(types).
+:- use_module(common).
 :- use_module(errors).
 :- use_module(walk).
 :- use_module(gd).
-:- use_module(id).
+:- use_module(inst).
 
 
 % DOC move this doc

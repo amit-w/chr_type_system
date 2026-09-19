@@ -1,10 +1,10 @@
 % DOC doc module
-:- module(walk).  % TASK explicit export list.
+:- module(walk, [unify_ty/2, typeof/4]).
 
-:- use_module(types).
+:- use_module(common).
 :- use_module(errors).
 :- use_module(gd).
-:- use_module(id).
+:- use_module(inst).
 
 
 :- chr_type bind_mode ---> mono ; poly(generalization_domain).
@@ -18,8 +18,9 @@
 %
 % Env is an association list of `bind(Name, Type)` cells. Each rule is a
 % simplification: the `typeof` goal is consumed and replaced by the
-% subgoals that decompose it. Variables first mentioned in a body (A, B,
-% TF, TA below) are fresh type variables.
+% subgoals that decompose it.
+% Variables first mentioned in a body (A, B, TF, TA below) are fresh type variables,
+% and are always associated with a GD by `associate_var` (or `associate_vars`).
 
 :- chr_constraint
     typeof(generalization_domain, list(binding), expr, ty),

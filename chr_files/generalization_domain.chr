@@ -1,10 +1,21 @@
 % DOC doc module
-:- module(gd).  % TASK explicit export list
+:- module(gd, [
+    type(generalization_domain/0),
+    % creation of GDs
+    mk_root/1, mk_child/2,
+    % checking descendance
+    is_descendant/2,
+    % associate unification vars
+    associate_var/2, associate_vars/2,
+    % dispose GDs & number tyvars
+    phase_dispose_GDs/0, phase_number_vars/0,
+    gd_args/3
+]).
 
 :- use_module(library(prelude)).
 :- use_module(library(lists)).
 
-:- use_module(types).
+:- use_module(common).
 :- use_module(errors).
 :- use_module(id).
 
@@ -18,14 +29,12 @@
     associate_var(ty, generalization_domain),
     associate_vars(list(ty), generalization_domain),
     generalization_domain(generalization_domain, int),
-    gd_args(generalization_domain, list(ty)),
+    gd_args(generalization_domain, int, list(ty)),
     number_domain(generalization_domain, int, int, list(ty)),
-    future_assign_tvars(list(ty), int),
     assign_tvars(list(ty), int, int),
     phase_dispose_GDs,
     phase_number_vars,
-    dispose_GD(generalization_domain, list(ty), int),
-    gd_arg_count(generalization_domain, int).
+    dispose_GD(generalization_domain, list(ty), int).
 
 % TITLE creation (+doc)
 mk_root(RootGD) <=>
@@ -69,13 +78,9 @@ number_gd @ phase_dispose_GDs \ generalization_domain(GD, Level) <=>
     dispose_GD(GD, [], Level).
 
 dispose_GD_var @ dispose_GD(GD, Vars, Level), associate_var(Var, GD) <=> dispose_GD(GD, [Var | Vars], Level).
-dispose_GD_end @ dispose_GD(GD, Vars, Level) <=>
-    % TODO the following two should be merged to gd_args(GD, Level, Vars) (maybe also incl. length?)
-    gd_args(GD, Vars),
-    future_assign_tvars(Vars, Level),
-    gd_arg_count(GD, length(Vars)).
+dispose_GD_end @ dispose_GD(GD, Vars, Level) <=> gd_args(GD, Level, Vars).
 
-phase_number_vars \ future_assign_tvars(Args, Level) <=>
+phase_number_vars \ gd_args(_, Level, Args) <=>
     assign_tvars(Args, Level, 0).
 
 assign_nil  @ assign_tvars([], _, _) <=> true.

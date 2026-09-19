@@ -1,11 +1,10 @@
 % DOC doc module
-% RENAME to inst/instantiate
-:- module(id, [instantiate_ty/4, phase_dispose_IDs/0]).
+:- module(inst, [instantiate_ty/4, phase_dispose_IDs/0]).
 
 :- use_module(library(prelude)).
 :- use_module(library(lists)).
 
-:- use_module(types).
+:- use_module(common).
 :- use_module(errors).
 :- use_module(walk).
 :- use_module(gd).
@@ -51,22 +50,15 @@ inst_direct     @
   is_descendant(GD, VarDomain) \
   instantiate_ty(D, T, V) <=>
     V = T.
-% RENAME level_high to something about the GD (since we don't even check the levels)
-inst_level_high @
-  instantiation_domain(D, _, GD),
-  associate_var(V, VarDomain),
-  is_descendant(VarDomain, GD) \
-  instantiate_ty(D, T, V) <=>
-    report_error(quote(inst_level_high)).
-inst_collision  @
+inst_unexpected @
   instantiation_domain(D, _, GD),
   associate_var(V, VarDomain) \
   instantiate_ty(D, T, V) <=>
     not(GD == VarDomain) |
-    report_error(quote(inst_gd_collision)).
+    report_error(quote(unexpected_gd_in_instantiate_ty)).
 
 
-phase_dispose_IDs, gd_args(GD, GDArgs) \ instantiation_domain(ID, VA, GD) <=>
+phase_dispose_IDs, gd_args(GD, _, GDArgs) \ instantiation_domain(ID, VA, GD) <=>
     dispose_ID(ID, VA, [], GDArgs).
 
 dispose_ID_var @ dispose_ID(ID, VA, IVars, [GVar | GVars]), instantiate_ty(ID, IVar, GVar) <=>

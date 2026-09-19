@@ -1,6 +1,5 @@
 % DOC doc module
-% RENAME I hate that the name of this file starts the same as typecheck.chr
-:- module(types).  % TASK explicit export list.
+:- module(common, [type(ty/0), type(expr/0), type(var_annotation/0)]).
 
 % The object language is *host-supplied data*: the Haskell driver builds
 % these compounds and passes them in. It is a declared type, and it is
@@ -21,7 +20,7 @@
 :- chr_type var_annotation ---> mono_var ; poly_var(list(ty)).
 
 % The type language is built and matched entirely inside this module.
-% TASK update next line
+% DOC update next line
 % `tvar` is produced only by `number_vars`, at the very end.
 % `tvar` is `tvar(Level, Number)`
 :- chr_type ty ---> tint ; arrow(ty, ty) ; tvar(int, int).

@@ -1,14 +1,10 @@
 % DOC doc module
 :- module(errors, [init/0, report_error/1, collect/1]).
+:- use_module(lists).
 
 % ==========================================================================
 % Error accumulation
 % ==========================================================================
-%
-% TODO maybe we should call `reverse` in `collect_es`?
-% Errors are prepended, so a program with several of them collects them in
-% reverse (most-recent-first) order. That is invisible here — every demo
-% raises at most one — but worth knowing before extending this.
 
 :- chr_constraint
     init,
@@ -19,5 +15,5 @@
 init <=> errors([]).
 
 accumulate @ report_error(E), errors(Es) <=> errors([E | Es]).
-collect_es @ collect(Out), errors(Es) <=> Out = Es.
+collect_es @ collect(Out), errors(Es) <=> Out is reverse(Es).
 
