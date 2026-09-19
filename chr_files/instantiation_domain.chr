@@ -40,17 +40,27 @@ inst_arrow      @ instantiation_domain(D, _, _), associate_var(T, T_GD) \ instan
     instantiate_ty(D, TB, B),
     unify_ty(T, arrow(TA, TB)).
 inst_error      @ instantiate_ty(_, _, Ty) <=> nonvar(Ty) | report_error(quote(inst_non_var(Ty))).
-inst_direct     @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), associate_var(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
-    instantiate_ty(D, T, V) <=>
-    DomainLevel > VarLevel |
-    V = T.
-% TODO reorder so the error case will be last
-inst_level_high @ instantiation_domain(D, _, GD), generalization_domain(GD, DomainLevel), associate_var(V, VarDomain), generalization_domain(VarDomain, VarLevel) \
-    instantiate_ty(D, T, V) <=>
-    DomainLevel < VarLevel |
-    report_error(quote(inst_level_high)).
 inst_singleton  @ instantiate_ty(D, T1, V) \ instantiate_ty(D, T2, V) <=>
     unify_ty(T1, T2).
+inst_direct     @
+  instantiation_domain(D, _, GD),
+  associate_var(V, VarDomain),
+  is_descendant(GD, VarDomain) \
+  instantiate_ty(D, T, V) <=>
+    V = T.
+% RENAME level_high to something about the GD (since we don't even check the levels)
+inst_level_high @
+  instantiation_domain(D, _, GD),
+  associate_var(V, VarDomain),
+  is_descendant(VarDomain, GD) \
+  instantiate_ty(D, T, V) <=>
+    report_error(quote(inst_level_high)).
+inst_collision  @
+  instantiation_domain(D, _, GD),
+  associate_var(V, VarDomain) \
+  instantiate_ty(D, T, V) <=>
+    not(GD == VarDomain) |
+    report_error(quote(inst_gd_collision)).
 
 
 phase_dispose_IDs, gd_args(GD, GDArgs) \ instantiation_domain(ID, VA, GD) <=>

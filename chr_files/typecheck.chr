@@ -62,7 +62,7 @@
 
 typecheck(Expr, T, Es) <=>
     errors:init,
-    generalization_domain(TopGD, 0),
+    mk_root(TopGD),
     associate_var(T, TopGD),
     typeof(TopGD, [], Expr, T),
     errors:collect(Es),

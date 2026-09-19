@@ -58,10 +58,8 @@ typeof_app @ typeof(GD, Env, app(F, Arg), T) <=>
     typeof(GD, Env, Arg, TA),
     unify_ty(TF, arrow(TA, T)).
 
-typeof_let @ generalization_domain(GD, Level) \ typeof(GD, Env, let(X, Val, Body), T) <=>
-    % TODO avoid having to deal with Level in this rule by having a `nested_gd` rule.
-    NestedLevel is Level + 1,
-    generalization_domain(NestedGD, NestedLevel),
+typeof_let @ typeof(GD, Env, let(X, Val, Body), T) <=>
+    mk_child(NestedGD, GD),
     associate_var(A, NestedGD),
     typeof(NestedGD, Env, Val, A),
     Env2 = [bind(X, poly(NestedGD), A) | Env],
