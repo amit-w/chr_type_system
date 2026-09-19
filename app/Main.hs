@@ -168,14 +168,14 @@ runRepl chrSource = do
           putStrLn $ viewTerm goal
           embededResult <- annotateIO PhaseEmbed $ typecheck cp goal e'
           (rawTypedExpr, rawExprType, rawErrors) <- annotateIO PhaseEncodeGoal $ runConvertIO $ embededResult
-          (exprType, typedExpr, errors) <- annotateIO PhaseDecodeResult $ do
-            (errors :: [Term]) <- runConvertIO $ fromTerm rawErrors
+          (errors :: [Term]) <- annotateIO PhaseDecodeResult $ runConvertIO $ fromTerm rawErrors
+          when (not (null errors)) $ annotateIO PhaseTypeCheck $ throwIONoBacktrace (IllTyped errors)
+          (exprType, typedExpr) <- annotateIO PhaseDecodeResult $ do
             exprType <- annotateIO (ContextExpr rawTypedExpr rawExprType) $ runConvertIO $ fromTerm rawExprType
             putStrLn $ "type: " ++ renderType False exprType
             typedExpr <- annotateIO (ContextType exprType) $ runConvertIO $ (decodeTypedExpr rawTypedExpr)
             putStrLn $ "annotated expr: " ++ renderExpr typedExpr
-            pure (exprType, typedExpr, errors)
-          when (not (null errors)) $ annotateIO PhaseTypeCheck $ throwIONoBacktrace (IllTyped errors)
+            pure (exprType, typedExpr)
           annotateIO PhaseSanityTypeCheck $ fromRightIO $ first SanityFailure $ Sanity.check typedExpr exprType
           pure True
       where
@@ -211,16 +211,3 @@ demoInputs =
 
 strip :: String -> String
 strip = f . f where f = reverse . dropWhile isSpace
-
-viewName :: Name -> String
-viewName (Qualified modName name) = T.unpack modName ++ ":" ++ T.unpack name
-viewName (Unqualified name) = T.unpack name
-
-viewTerm :: Term -> String
-viewTerm (VarTerm name) = T.unpack name
-viewTerm (IntTerm n) = show n
-viewTerm (FloatTerm n) = show n
-viewTerm (TextTerm s) = show s
-viewTerm (CompoundTerm name []) = viewName name
-viewTerm (CompoundTerm name xs) = viewName name ++ "(" ++ intercalate ", " (map viewTerm xs) ++ ")"
-viewTerm Wildcard = "_"

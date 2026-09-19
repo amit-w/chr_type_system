@@ -4,14 +4,17 @@ module PrettyPrint
   , describeSanityTCError
   , describeError
   , renderExpr
+  , viewTerm
   )
 where
+
+import Data.List (intercalate)
 
 import Data.Text qualified as T
 import Data.Text (Text)
 
 import YCHR
-    ( Term(CompoundTerm, IntTerm, TextTerm, VarTerm, Wildcard),
+    ( Term(..),
       Name(..) ) 
 
 import Language.Lambda.Typecheck
@@ -88,7 +91,7 @@ describeError t = case t of
   CompoundTerm inst_non_var [ty] | inst_non_var == Unqualified "inst_non_var" -> "tried to instantiate a non-var: " ++ renderTypeTerm ty
   CompoundTerm my_error [] | my_error == Unqualified "my_error" -> "my_error"
   CompoundTerm other_error [expr] | other_error == Unqualified "other_error" -> "other_error: " ++ show expr
-  _ -> "?"
+  _ -> "unparsed error: " ++ viewTerm t
 
 renderExpr :: GenExpr TypeAnnotations -> String
 renderExpr expr = runRender (go expr) where
@@ -132,3 +135,16 @@ tyVarName n
 parenthesize :: Bool -> String -> String
 parenthesize True s = "(" ++ s ++ ")"
 parenthesize False s = s
+
+viewName :: Name -> String
+viewName (Qualified modName name) = T.unpack modName ++ ":" ++ T.unpack name
+viewName (Unqualified name) = T.unpack name
+
+viewTerm :: Term -> String
+viewTerm (VarTerm name) = T.unpack name
+viewTerm (IntTerm n) = show n
+viewTerm (FloatTerm n) = show n
+viewTerm (TextTerm s) = show s
+viewTerm (CompoundTerm name []) = viewName name
+viewTerm (CompoundTerm name xs) = viewName name ++ "(" ++ intercalate ", " (map viewTerm xs) ++ ")"
+viewTerm Wildcard = "_"
