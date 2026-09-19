@@ -20,18 +20,21 @@
     phase_dispose_IDs,
     dispose_ID(instantiation_domain, var_annotation, list(ty), list(ty)).
 
-% TITLE entry-point
-instantiate_ty(GD, VA, T1, T2) <=>
-    instantiation_domain(D, VA, GD),
-    instantiate_ty(D, T1, T2).
 
+% DOC title should include both instantiate_ty/3 & instantiate_ty/4
 % ==========================================================================
 % Instantiation: instantiate_ty(D, T1, T2)
 % ==========================================================================
 %
+% DOC describe the difference between instantiate_ty/3 & instantiate_ty/4
 % Instantiate T2 to T1 in instantiation-domain D.
 % The instantiation-domain is used to make sure that an instantiated variable always instantiate to the same type.
 % instantiation_domain(D, Level) sets the associate_var of the domain.   % DOC update this line
+instantiate_ty(GD, VA, T1, T2) <=>
+    instantiation_domain(D, VA, GD),
+    instantiate_ty(D, T1, T2).
+
+% DOC update every rule that handles instantiate_ty
 inst_tint       @ instantiate_ty(D, T, tint) <=> unify_ty(T, tint).
 inst_arrow      @ instantiation_domain(D, _, _), associate_var(T, T_GD) \ instantiate_ty(D, T, arrow(A, B)) <=>
     associate_var(TA, T_GD),
