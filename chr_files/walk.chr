@@ -78,9 +78,7 @@ typeof_let @ generalization_domain(GD, Level) \ typeof(GD, Env, let(X, Val, Body
 
 lookup_mono @ lookup_ty([bind(X, mono, Ty) | _], X, T, VA) <=> unify_ty(T, Ty), VA = mono_var.
 lookup_poly @ lookup_ty([bind(X, poly(GD), Ty) | _], X, T, VA) <=>
-    % TODO make a constraint in id.chr that encapsulate these
-    instantiation_domain(D, VA, GD),
-    instantiate_ty(D, T, Ty).
+    instantiate_ty(GD, VA, T, Ty).
 lookup_skip @ lookup_ty([bind(_, _, _) | Rest], X, T, VA) <=> lookup_ty(Rest, X, T, VA).
 lookup_miss @ lookup_ty([], X, _, VA) <=> report_error(quote(unbound_variable(X))).
 
