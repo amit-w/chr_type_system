@@ -106,7 +106,7 @@ renderExpr expr = runRender (go expr) where
   go (Var (Poly ts) v) = mconcat [
       renderText v,
       " @",
-      paren (foldMap (renderString . renderType True) ts)
+      paren (foldMap (renderString . renderType True <> renderString . const " ") ts)
     ]
   go (Let v e1 e2) = withPrec 2 $ mconcat [
       "let ",
