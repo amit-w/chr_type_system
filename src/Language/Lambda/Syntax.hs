@@ -6,23 +6,23 @@
 -- own module so "Parser" and "Main" can both import it without a cycle;
 -- the 'ToTerm' instance lives here too (with the type it encodes) so it is
 -- not an orphan.
-module Language.Lambda.Syntax
-  ( GenExpr (App, Let, IntLit, Add, Var, Lam),
-    Loc (..),
-    SLoc (..),
-  )
+module Language.Lambda.Syntax (
+  GenExpr (App, Let, IntLit, Add, Var, Lam),
+  Loc (..),
+  SLoc (..),
+)
 where
 
 import Data.Functor.Const (Const (..))
+import Data.Singletons (Sing, SingI (sing))
 import GHC.Generics (Generic1)
 
-import Data.Singletons (Sing, SingI (sing))
 import Data.Text (Text)
 
 import YCHR (ToTerm (..), compound)
 
-import Data.HFunctor (HFunctor (..))
 import Data.HFoldable (HFoldable (..))
+import Data.HFunctor (HFunctor (..))
 import Data.HTraversable (HTraversable (..))
 
 data Loc = LocVar | LocLam
@@ -39,9 +39,8 @@ instance SingI LocVar where
 instance SingI LocLam where
   sing = SLocLam
 
-
 -- HACK: including (f loc) directly in GenExpr will prevent it from being Generic1, so we use this instead
-data Apply (l :: Loc) f = Apply { getApply :: f l }
+data Apply (l :: Loc) f = Apply {getApply :: f l}
   deriving (Eq, Show)
 
 instance (SingI x) => HFunctor (Apply x) where
@@ -52,7 +51,6 @@ instance (SingI x) => HFoldable (Apply x) where
 
 instance (SingI x) => HTraversable (Apply x) where
   htraverse f (Apply a) = Apply <$> f a
-
 
 -- | Unannotated lambda terms. @let x = e1 in e2@ is desugared by the
 -- parser to @(\\x. e2) e1@, so it needs no constructor of its own.

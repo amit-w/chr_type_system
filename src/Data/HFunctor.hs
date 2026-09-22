@@ -4,19 +4,19 @@ module Data.HFunctor (HFunctor (..)) where
 
 import Data.Kind (Type)
 import Data.Singletons (SingI (..))
-import GHC.Generics
-  ( Generic1 (Rep1, from1, to1),
-    K1 (K1),
-    M1 (M1),
-    Rec1 (Rec1),
-    type (:*:) (..),
-    type (:+:) (..),
-  )
+import GHC.Generics (
+  Generic1 (Rep1, from1, to1),
+  K1 (K1),
+  M1 (M1),
+  Rec1 (Rec1),
+  type (:*:) (..),
+  type (:+:) (..),
+ )
 
 -- HFunctor
 class HFunctor (t :: (k -> Type) -> Type) where
-  hmap :: (forall x. SingI x => f x -> g x) -> t f -> t g
-  default hmap :: (Generic1 t, HFunctor (Rep1 t)) => (forall x. SingI x => f x -> g x) -> t f -> t g
+  hmap :: (forall x. (SingI x) => f x -> g x) -> t f -> t g
+  default hmap :: (Generic1 t, HFunctor (Rep1 t)) => (forall x. (SingI x) => f x -> g x) -> t f -> t g
   hmap f = to1 . hmap f . from1
 
 instance (HFunctor h) => HFunctor (M1 i c h) where

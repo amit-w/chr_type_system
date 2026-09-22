@@ -1,37 +1,39 @@
-module PrettyPrint
-  ( renderType
-  , renderTypeTerm
-  , describeSanityTCError
-  , describeError
-  , renderExpr
-  , viewTerm
-  )
+module PrettyPrint (
+  renderType,
+  renderTypeTerm,
+  describeSanityTCError,
+  describeError,
+  renderExpr,
+  viewTerm,
+)
 where
 
 import Data.List (intercalate)
 
-import Data.Text qualified as T
 import Data.Text (Text)
+import Data.Text qualified as T
 
-import YCHR
-    ( Term(..),
-      Name(..) ) 
+import YCHR (
+  Name (..),
+  Term (..),
+ )
 
-import Language.Lambda.Typecheck
-    ( Type(..),
-      TypeAnnotations(Poly, ArgType, Mono) ) 
-import Language.Lambda.Syntax ( GenExpr(..) ) 
+import Language.Lambda.Syntax (GenExpr (..))
+import Language.Lambda.Typecheck (
+  Type (..),
+  TypeAnnotations (ArgType, Mono, Poly),
+ )
 import Language.Lambda.Typecheck.Sanity qualified as Sanity
 
-import Render
-    ( restartPrec,
-      paren,
-      renderString,
-      renderText,
-      runRender,
-      withPrec,
-      noAssoc ) 
-
+import Render (
+  noAssoc,
+  paren,
+  renderString,
+  renderText,
+  restartPrec,
+  runRender,
+  withPrec,
+ )
 
 renderType :: Bool -> Type -> String
 renderType _ TInt = "int"
@@ -57,24 +59,47 @@ renderTypeTerm t = case t of
   _ -> "?"
 
 describeSanityTCError :: Sanity.Error -> String
-describeSanityTCError Sanity.TypeMismatch { Sanity.expected , Sanity.actual } = mconcat [
-  "expected: ", renderType False expected, ", found: ", renderType False actual, "."
-  ]
-describeSanityTCError Sanity.ExpectedArrow { Sanity.actual } = mconcat [
-  "expected a function type, found: ", renderType False actual, "."
-  ]
-describeSanityTCError Sanity.NotInScope { Sanity.varName } = mconcat [
-  "not in scope: ", T.unpack varName
-  ]
-describeSanityTCError (Sanity.VarSortMismatch varName mismatchKind) = mconcat [
-  "var sort mismatch in ", T.unpack varName, ". var is: ", expected, ", used as: ", actual, "."
-  ] where
-    (expected, actual) = case mismatchKind of
-      Sanity.VarIsMono -> ("mono", "poly")
-      Sanity.VarIsPoly -> ("poly", "mono")
-describeSanityTCError (Sanity.NotEnoughTypeParams index len) = mconcat [
-  "not enough type parameters. accessed index ", show index, ", while there are only ", show len, " type parameters."
-  ]
+describeSanityTCError Sanity.TypeMismatch{Sanity.expected, Sanity.actual} =
+  mconcat
+    [ "expected: "
+    , renderType False expected
+    , ", found: "
+    , renderType False actual
+    , "."
+    ]
+describeSanityTCError Sanity.ExpectedArrow{Sanity.actual} =
+  mconcat
+    [ "expected a function type, found: "
+    , renderType False actual
+    , "."
+    ]
+describeSanityTCError Sanity.NotInScope{Sanity.varName} =
+  mconcat
+    [ "not in scope: "
+    , T.unpack varName
+    ]
+describeSanityTCError (Sanity.VarSortMismatch varName mismatchKind) =
+  mconcat
+    [ "var sort mismatch in "
+    , T.unpack varName
+    , ". var is: "
+    , expected
+    , ", used as: "
+    , actual
+    , "."
+    ]
+ where
+  (expected, actual) = case mismatchKind of
+    Sanity.VarIsMono -> ("mono", "poly")
+    Sanity.VarIsPoly -> ("poly", "mono")
+describeSanityTCError (Sanity.NotEnoughTypeParams index len) =
+  mconcat
+    [ "not enough type parameters. accessed index "
+    , show index
+    , ", while there are only "
+    , show len
+    , " type parameters."
+    ]
 
 describeError :: Term -> String
 describeError t = case t of
@@ -94,28 +119,34 @@ describeError t = case t of
   _ -> "unparsed error: " ++ viewTerm t
 
 renderExpr :: GenExpr TypeAnnotations -> String
-renderExpr expr = runRender (go expr) where
-  go (Lam (ArgType ty) v e) = withPrec 1 $ mconcat [
-      "\\",
-      paren $ mconcat [renderText v, ": ", renderString (renderType False ty)],
-      ". ",
-      go e
-    ]
+renderExpr expr = runRender (go expr)
+ where
+  go (Lam (ArgType ty) v e) =
+    withPrec 1 $
+      mconcat
+        [ "\\"
+        , paren $ mconcat [renderText v, ": ", renderString (renderType False ty)]
+        , ". "
+        , go e
+        ]
   go (App l r) = withPrec 7 $ go l <> " " <> noAssoc (go r)
   go (Var Mono v) = renderText v
-  go (Var (Poly ts) v) = mconcat [
-      renderText v,
-      " @",
-      paren (foldMap (renderString . renderType True <> renderString . const " ") ts)
-    ]
-  go (Let v e1 e2) = withPrec 2 $ mconcat [
-      "let ",
-      renderText v,
-      " = ",
-      restartPrec (go e1),
-      " in ",
-      go e2
-    ]
+  go (Var (Poly ts) v) =
+    mconcat
+      [ renderText v
+      , " @"
+      , paren (foldMap (renderString . renderType True <> renderString . const " ") ts)
+      ]
+  go (Let v e1 e2) =
+    withPrec 2 $
+      mconcat
+        [ "let "
+        , renderText v
+        , " = "
+        , restartPrec (go e1)
+        , " in "
+        , go e2
+        ]
   go (IntLit n) = renderString $ show n
   go (Add l r) = withPrec 3 $ go l <> " + " <> go r
 

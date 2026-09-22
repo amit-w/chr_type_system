@@ -11,21 +11,22 @@
 --
 -- Application binds tighter than @+@, so @f x + 1@ is @(f x) + 1@; a lambda
 -- body runs as far right as possible, so @\\x. x + 1@ is @\\x. (x + 1)@.
-module Language.Lambda.Parser
-  ( Expr,
-    parseExpr,
-    ParseError,
-  )
+module Language.Lambda.Parser (
+  Expr,
+  parseExpr,
+  ParseError,
+)
 where
 
 import Control.Exception (Exception)
 import Data.Functor.Const (Const (..))
+
 import Data.Text qualified as T
 
 import Text.Parsec hiding (ParseError)
+import Text.Parsec qualified as Parsec
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
-import Text.Parsec qualified as Parsec
 import Text.Parsec.Token qualified as Tok
 
 import Language.Lambda.Syntax (GenExpr (..))
@@ -51,10 +52,10 @@ lexer :: Tok.TokenParser ()
 lexer =
   Tok.makeTokenParser
     emptyDef
-      { Tok.identStart = letter <|> char '_',
-        Tok.identLetter = alphaNum <|> char '_',
-        Tok.reservedNames = ["let", "in"],
-        Tok.reservedOpNames = ["\\", ".", "+", "="]
+      { Tok.identStart = letter <|> char '_'
+      , Tok.identLetter = alphaNum <|> char '_'
+      , Tok.reservedNames = ["let", "in"]
+      , Tok.reservedOpNames = ["\\", ".", "+", "="]
       }
 
 identifier :: Parser T.Text

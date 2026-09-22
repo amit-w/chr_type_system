@@ -4,22 +4,22 @@ module Data.HTraversable (HTraversable (..)) where
 
 import Data.Kind (Type)
 import Data.Singletons (SingI (..))
-import GHC.Generics
-  ( Generic1 (Rep1, from1, to1),
-    K1 (K1),
-    M1 (M1),
-    Rec1 (Rec1),
-    type (:*:) (..),
-    type (:+:) (..),
-  )
+import GHC.Generics (
+  Generic1 (Rep1, from1, to1),
+  K1 (K1),
+  M1 (M1),
+  Rec1 (Rec1),
+  type (:*:) (..),
+  type (:+:) (..),
+ )
 
-import Data.HFunctor (HFunctor)
 import Data.HFoldable (HFoldable)
+import Data.HFunctor (HFunctor)
 
 -- HTraversable
 class (HFunctor t, HFoldable t) => HTraversable (t :: (k -> Type) -> Type) where
-  htraverse :: Applicative m => (forall x. SingI x => f x -> m (g x)) -> t f -> m (t g)
-  default htraverse :: (Generic1 t, HTraversable (Rep1 t)) => Applicative m => (forall x. SingI x => f x -> m (g x)) -> t f -> m (t g)
+  htraverse :: (Applicative m) => (forall x. (SingI x) => f x -> m (g x)) -> t f -> m (t g)
+  default htraverse :: (Generic1 t, HTraversable (Rep1 t)) => (Applicative m) => (forall x. (SingI x) => f x -> m (g x)) -> t f -> m (t g)
   htraverse f a = fmap to1 . htraverse f . from1 $ a
 
 instance (HTraversable h) => HTraversable (M1 i c h) where

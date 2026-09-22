@@ -1,39 +1,38 @@
 -- A simple type-checker (no unification) that can verify the output of Language.Lambda.Typecheck
-module Language.Lambda.Typecheck.Sanity (Error(..), VarSortMismatch (..), infer, check) where
+module Language.Lambda.Typecheck.Sanity (Error (..), VarSortMismatch (..), infer, check) where
 
-import Data.Monoid (Endo(..))
-import Data.Bifunctor (Bifunctor(first))
-import Data.Foldable (traverse_)
-import Control.Monad ((>=>), when)
-
+import Control.Monad (when, (>=>))
+import Control.Monad.Error.Class (MonadError (throwError))
 import Control.Monad.Reader (MonadReader (local), ReaderT (runReaderT), asks)
-import Control.Monad.Error.Class (MonadError(throwError))
+import Data.Bifunctor (Bifunctor (first))
+import Data.Foldable (traverse_)
+import Data.List ((!?))
+import Data.Monoid (Endo (..))
 
 import Data.Text (Text)
 
 import Data.Validation (Validation, toEither)
-import Language.Lambda.Syntax (GenExpr(..))
-import Language.Lambda.Typecheck (TypedExpr, Type (..), TypeAnnotations (ArgType))
+import Language.Lambda.Syntax (GenExpr (..))
+import Language.Lambda.Typecheck (Type (..), TypeAnnotations (ArgType), TypedExpr)
 import Language.Lambda.Typecheck qualified as Typed
-import Data.List ((!?))
 
 data VarType
   = Mono Type
   | Poly
-    { instLevel :: Int
       -- TODO add type-param count
-    , ty :: Type
-    }
+      { instLevel :: Int
+      , ty :: Type
+      }
 
-data Env = Env { vars :: [(Text, VarType)], level :: Int }
+data Env = Env {vars :: [(Text, VarType)], level :: Int}
 
 data VarSortMismatch = VarIsMono | VarIsPoly
   deriving (Show)
 
 data Error
-  = TypeMismatch { expected :: Type, actual :: Type }
-  | ExpectedArrow { actual :: Type }
-  | NotInScope { varName :: Text }
+  = TypeMismatch {expected :: Type, actual :: Type}
+  | ExpectedArrow {actual :: Type}
+  | NotInScope {varName :: Text}
   | VarSortMismatch Text VarSortMismatch
   | NotEnoughTypeParams Int Int
   deriving (Show)
@@ -47,7 +46,7 @@ extendEnv :: Text -> VarType -> M a -> M a
 extendEnv varName ty = local $ \env -> env{vars = (varName, ty) : env.vars}
 
 lookupEnv :: Text -> M VarType
-lookupEnv varName = asks (\env -> lookup varName env.vars) `orElse` NotInScope {varName}
+lookupEnv varName = asks (\env -> lookup varName env.vars) `orElse` NotInScope{varName}
 
 typeError :: Error -> M a
 typeError e = throwError $ Endo (e :)
@@ -56,11 +55,13 @@ orElse :: M (Maybe a) -> Error -> M a
 orElse ma err = ma >>= maybe (typeError err) pure
 
 runM :: M a -> Either [Error] a
-runM ma = first (reverse . flip appEndo mempty) $ toEither $ runReaderT ma initialEnv where
-  initialEnv = Env { vars=[] , level=0 }
+runM ma = first (reverse . flip appEndo mempty) $ toEither $ runReaderT ma initialEnv
+ where
+  initialEnv = Env{vars = [], level = 0}
 
 inst :: Int -> [Type] -> Type -> M Type
-inst instLevel typeParams = go where
+inst instLevel typeParams = go
+ where
   go :: Type -> M Type
   go TInt = pure TInt
   go (TArrow argTy resTy) = liftA2 TArrow (go argTy) (go resTy)
@@ -84,19 +85,19 @@ walk (App f arg) = do
   pure resTy
 walk (Let v e1 e2) = do
   (instLevel, ty) <- nestEnv $ liftA2 (,) (asks level) (walk e1)
-  extendEnv v (Poly {instLevel, ty}) $ walk e2
+  extendEnv v (Poly{instLevel, ty}) $ walk e2
 walk (IntLit _) = pure TInt
 walk (Add l r) = traverse_ (walk >=> checkEq TInt) [l, r] *> pure TInt
 
 infer :: TypedExpr -> Either [Error] Type
-infer  = runM . walk
+infer = runM . walk
 
 check :: TypedExpr -> Type -> Either [Error] ()
-check expr ty = runM $ walk expr >>= checkEq ty 
+check expr ty = runM $ walk expr >>= checkEq ty
 
 checkArrow :: Type -> M (Type, Type)
 checkArrow (TArrow a b) = pure (a, b)
-checkArrow ty = typeError $ ExpectedArrow {actual=ty}
+checkArrow ty = typeError $ ExpectedArrow{actual = ty}
 
 checkEq :: Type -> Type -> M ()
-checkEq expected actual = when (expected /= actual) $ typeError TypeMismatch {expected, actual}
+checkEq expected actual = when (expected /= actual) $ typeError TypeMismatch{expected, actual}

@@ -1,22 +1,22 @@
 module Render (
-    Render,
-    restartPrec,
-    paren,
-    renderString,
-    renderText,
-    runRender,
-    withPrec,
-    noAssoc,
+  Render,
+  restartPrec,
+  paren,
+  renderString,
+  renderText,
+  runRender,
+  withPrec,
+  noAssoc,
 ) where
 
-import Control.Monad.Reader (MonadReader(local))
-
+import Control.Monad.Reader (MonadReader (local))
 import Data.Monoid (Endo (..))
-import Data.Text (Text, unpack)
 import Data.String (IsString (fromString))
 
+import Data.Text (Text, unpack)
+
 newtype Render = Render (Int -> ShowS)
-    deriving (Semigroup, Monoid) via (Int -> Endo String)
+  deriving (Semigroup, Monoid) via (Int -> Endo String)
 
 restartPrec :: Render -> Render
 restartPrec (Render f) = Render $ local (const 0) f
@@ -25,7 +25,7 @@ paren :: Render -> Render
 paren fa = renderText "(" <> restartPrec fa <> renderText ")"
 
 renderString :: String -> Render
-renderString s = Render $ const (s ++) 
+renderString s = Render $ const (s ++)
 
 instance IsString Render where
   fromString = renderString

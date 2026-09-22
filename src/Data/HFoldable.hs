@@ -4,19 +4,19 @@ module Data.HFoldable (HFoldable (..)) where
 
 import Data.Kind (Type)
 import Data.Singletons (SingI (..))
-import GHC.Generics
-  ( Generic1 (Rep1, from1),
-    K1 (K1),
-    M1 (M1),
-    Rec1 (Rec1),
-    type (:*:) (..),
-    type (:+:) (..),
-  )
+import GHC.Generics (
+  Generic1 (Rep1, from1),
+  K1 (K1),
+  M1 (M1),
+  Rec1 (Rec1),
+  type (:*:) (..),
+  type (:+:) (..),
+ )
 
 -- HFoldable
 class HFoldable (t :: (k -> Type) -> Type) where
-  hfoldMap :: Monoid m => (forall x. SingI x => f x -> m) -> t f -> m
-  default hfoldMap :: (Generic1 t, HFoldable (Rep1 t)) => Monoid m => (forall x. SingI x => f x -> m) -> t f -> m
+  hfoldMap :: (Monoid m) => (forall x. (SingI x) => f x -> m) -> t f -> m
+  default hfoldMap :: (Generic1 t, HFoldable (Rep1 t)) => (Monoid m) => (forall x. (SingI x) => f x -> m) -> t f -> m
   hfoldMap f = hfoldMap f . from1
 
 instance (HFoldable h) => HFoldable (M1 i c h) where

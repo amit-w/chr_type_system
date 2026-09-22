@@ -1,40 +1,39 @@
 {-# LANGUAGE DataKinds #-}
 
 module Language.Lambda.Typecheck (
-  Type(..),
-  TypeAnnotations(..),
+  Type (..),
+  TypeAnnotations (..),
   TypedExpr,
   RawTypedExpr,
   typecheck,
   numberExpr,
   typecheckGoal,
   decodeTypedExpr,
-  ) where
+) where
 
-import Control.Monad.State (evalState, State, modify, MonadState (get))
+import Control.Monad.State (MonadState (get), State, evalState, modify)
 import Data.Coerce (coerce)
 import Data.Functor.Const (Const (..))
-
 import Data.Map (Map, findWithDefault)
-import Data.Text (Text, pack)
 import Data.Singletons (SingI (..))
 
-import YCHR
-  ( CompiledProgram,
-    FromTerm (..),
-    Term (..),
-    ToTerm,
-    argAt,
-    compound,
-    decodeSum,
-    runQueryCompiledWith,
-    toTerm,
-    ConvertError,
-  )
+import Data.Text (Text, pack)
 
-import Data.HFunctor (HFunctor(hmap))
+import YCHR (
+  CompiledProgram,
+  ConvertError,
+  FromTerm (..),
+  Term (..),
+  ToTerm,
+  argAt,
+  compound,
+  decodeSum,
+  runQueryCompiledWith,
+  toTerm,
+ )
+
+import Data.HFunctor (HFunctor (hmap))
 import Data.HTraversable (HTraversable (htraverse))
-
 import Language.Lambda.Parser (Expr)
 import Language.Lambda.Syntax (GenExpr (..), Loc (..), SLoc (..))
 
@@ -53,7 +52,8 @@ type NumberedExpr = GenExpr (Const ChrVar)
 type RawTypedExpr = GenExpr (Const Term)
 
 numberExpr :: Expr -> NumberedExpr
-numberExpr e = evalState (htraverse (const freshVariable) e) 0 where
+numberExpr e = evalState (htraverse (const freshVariable) e) 0
+ where
   freshVariable :: State Int (Const ChrVar x)
   freshVariable = do
     modify (+ 1)
@@ -61,7 +61,6 @@ numberExpr e = evalState (htraverse (const freshVariable) e) 0 where
 
   indexToVarName :: Int -> Text
   indexToVarName = ("Var" <>) . pack . show
-
 
 -- ---------------------------------------------------------------------------
 -- Output of the .chr program
@@ -78,9 +77,9 @@ data Type
 instance FromTerm Type where
   fromTerm =
     decodeSum
-      [ ("tint", 0, \_ -> Right TInt),
-        ("arrow", 2, \as -> TArrow <$> argAt 0 as <*> argAt 1 as),
-        ("tvar", 2, \as -> TVar <$> argAt 0 as <*> argAt 1 as)
+      [ ("tint", 0, \_ -> Right TInt)
+      , ("arrow", 2, \as -> TArrow <$> argAt 0 as <*> argAt 1 as)
+      , ("tvar", 2, \as -> TVar <$> argAt 0 as <*> argAt 1 as)
       ]
 
 -- | The inferencer answers with @ok(Type)@ or @type_error(Errors)@. The
@@ -93,12 +92,12 @@ data TCResult
 instance FromTerm TCResult where
   fromTerm =
     decodeSum
-      [ ("ok", 1, \as -> Ok <$> argAt 0 as),
-        ("type_error", 1, \as -> Ill <$> argAt 0 as)
+      [ ("ok", 1, \as -> Ok <$> argAt 0 as)
+      , ("type_error", 1, \as -> Ill <$> argAt 0 as)
       ]
 
 data family TypeAnnotations (loc :: Loc)
-newtype instance TypeAnnotations LocLam = ArgType { getType :: Type }
+newtype instance TypeAnnotations LocLam = ArgType {getType :: Type}
   deriving (Show)
 data instance TypeAnnotations LocVar = Mono | Poly [Type]
   deriving (Show)
@@ -120,11 +119,11 @@ typecheck cp goal expr = runQueryCompiledWith cp goal (Right . decodeResult expr
 -- TODO (rename): `decode` is used in this module for two quite different things.
 decodeResult :: NumberedExpr -> Map Text Term -> (GenExpr (Const Term), Term, Term)
 decodeResult e varMap = (typedExpr, exprType, errors)
-  where
-    typedExpr = hmap (coerce getVar) e
-    exprType = getVar "Type"
-    errors = getVar "Errors"
-    getVar varName = findWithDefault (VarTerm varName) varName varMap
+ where
+  typedExpr = hmap (coerce getVar) e
+  exprType = getVar "Type"
+  errors = getVar "Errors"
+  getVar varName = findWithDefault (VarTerm varName) varName varMap
 
 decodeTypedExpr :: RawTypedExpr -> Either ConvertError TypedExpr
 decodeTypedExpr = htraverse (coerce decodeAnnotation)
@@ -133,9 +132,10 @@ decodeAnnotation :: forall x. (SingI x) => Term -> Either ConvertError (TypeAnno
 decodeAnnotation term = case sing @x of
   SLocVar -> do
     decodeSum
-      [ ("mono_var", 0, const (pure Mono)),
-        ("poly_var", 1, \as -> fmap Poly (argAt 0 as))
-      ] term
+      [ ("mono_var", 0, const (pure Mono))
+      , ("poly_var", 1, \as -> fmap Poly (argAt 0 as))
+      ]
+      term
   SLocLam -> ArgType <$> fromTerm term
 
 -- | Build the goal @typecheck(<expr>, Result)@. The encoded expression
